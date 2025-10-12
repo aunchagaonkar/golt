@@ -92,7 +92,7 @@ func (s *Server) Stop() {
 	}
 
 	if s.grpcServer != nil {
-		log.Printf("[%s] Stopping gRPC sverer", s.node.ID())
+		log.Printf("[%s] Stopping gRPC server", s.node.ID())
 		s.grpcServer.GracefulStop()
 	}
 }

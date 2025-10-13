@@ -239,7 +239,6 @@ func (n *node) BecomeFollower(term uint64) {
 
 func (n *node) BecomeLeader() {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	if n.state == Leader {
 		return
@@ -253,6 +252,7 @@ func (n *node) BecomeLeader() {
 		n.nextIndex[peer] = uint64(len(n.log))
 		n.matchIndex[peer] = 0
 	}
+	n.mu.Unlock()
 
 	log.Printf("[%s] Becoming Leader for term %d", id, term)
 	n.StartHeartbeatLoop()

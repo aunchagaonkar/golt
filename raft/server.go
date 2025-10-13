@@ -64,20 +64,40 @@ func (s *Server) Start() error {
 func (s *Server) ConnectToPeers() {
 	peers := s.node.Peers()
 
-	for _, addr := range peers {
-		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	for _, peerAddr := range peers {
+		go func(addr string) {
+			for i := 0; i < 5; i++ {
+				conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					log.Printf("[%s] Failed to create client for peer %s (attempt %d): %v", s.node.ID(), addr, i+1, err)
+					if i < 4 {
+						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+					}
+					continue
+				}
 
-		if err != nil {
-			log.Printf("[%s] Failed to create client for peer %s: %v", s.node.ID(), addr, err)
-			continue
-		}
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+				_, err = pb.NewRaftServiceClient(conn).Ping(ctx, &pb.PingRequest{NodeId: s.node.ID()})
+				cancel()
+				if err != nil {
+					log.Printf("[%s] Ping test failed for peer %s (attempt %d): %v", s.node.ID(), addr, i+1, err)
+					conn.Close()
+					if i < 4 {
+						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
+					}
+					continue
+				}
 
-		s.peerMu.Lock()
-		s.peerClients[addr] = pb.NewRaftServiceClient(conn)
-		s.peerConns[addr] = conn
-		s.peerMu.Unlock()
+				s.peerMu.Lock()
+				s.peerClients[addr] = pb.NewRaftServiceClient(conn)
+				s.peerConns[addr] = conn
+				s.peerMu.Unlock()
 
-		log.Printf("[%s] Client created for peer %s", s.node.ID(), addr)
+				log.Printf("[%s] Connected to peer %s", s.node.ID(), addr)
+				return
+			}
+			log.Printf("[%s] Failed to connect to peer %s after 5 attempts", s.node.ID(), addr)
+		}(peerAddr)
 	}
 }
 func (s *Server) Stop() {

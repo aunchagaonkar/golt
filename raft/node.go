@@ -311,3 +311,94 @@ func (n *node) StopTimers() {
 
 	log.Printf("[%s] All timers stopped", n.id)
 }
+
+func (n *node) LastLogIndex() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if len(n.log) == 0 {
+		return 0
+	}
+	return n.log[len(n.log)-1].Index
+}
+
+func (n *node) LastLogTerm() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if len(n.log) == 0 {
+		return 0
+	}
+	return n.log[len(n.log)-1].Term
+}
+
+func (n *node) IsLogUpToDate(candidateLastLogIndex, candidateLastLogTerm uint64) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	var myLastLogTerm, myLastLogIndex uint64
+	if len(n.log) > 0 {
+		myLastLogTerm = n.log[len(n.log)-1].Term
+		myLastLogIndex = n.log[len(n.log)-1].Index
+	}
+
+	if candidateLastLogTerm != myLastLogTerm {
+		return candidateLastLogTerm > myLastLogTerm
+	}
+	return candidateLastLogIndex >= myLastLogIndex
+}
+
+func (n *node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogIndex, candidateLastLogTerm uint64) (voteGranted bool, currTerm uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	currTerm = n.currentTerm
+
+	if candidateTerm < n.currentTerm {
+		log.Printf("[%s] Rejecting vote for %s: candidate term %d < current term %d", n.id, candidateID, candidateTerm, n.currentTerm)
+		return false, currTerm
+	}
+
+	if candidateTerm > n.currentTerm {
+		log.Printf("[%s] Updating term from %d to %d from RequestVote", n.id, n.currentTerm, candidateTerm)
+		n.currentTerm = candidateTerm
+		n.votedFor = ""
+		n.state = Follower
+		currTerm = n.currentTerm
+	}
+
+	canVote := (n.votedFor == "" || n.votedFor == candidateID)
+	if !canVote {
+		log.Printf("[%s] Rejecting vote for %s: already voted for %s in term %d", n.id, candidateID, n.votedFor, n.currentTerm)
+		return false, currTerm
+	}
+
+	var myLastLogTerm, myLastLogIndex uint64
+	if len(n.log) > 0 {
+		myLastLogTerm = n.log[len(n.log)-1].Term
+		myLastLogIndex = n.log[len(n.log)-1].Index
+	}
+
+	isUpToDate := false
+	if candidateLastLogTerm != myLastLogTerm {
+		isUpToDate = candidateLastLogTerm > myLastLogTerm
+	} else {
+		isUpToDate = candidateLastLogIndex >= myLastLogIndex
+	}
+
+	if !isUpToDate {
+		log.Printf("[%s] Rejecting vote for %s: candidate's log is not up-to-date", n.id, candidateID)
+		return false, currTerm
+	}
+
+	n.votedFor = candidateID
+	log.Printf("[%s] Granting vote for %s in term %d", n.id, candidateID, n.currentTerm)
+	return true, currTerm
+}
+
+func (n *node) ClusterSize() int {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return len(n.peers) + 1
+}
+func (n *node) MajoritySize() int {
+	return (n.ClusterSize() / 2) + 1
+}

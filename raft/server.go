@@ -122,9 +122,94 @@ func (s *Server) Node() *node {
 }
 
 func (s *Server) onBecomeCandidate() {
-	log.Printf("[%s] Candidate callback triggered", s.node.ID())
-	// TODO
+	s.peerMu.RLock()
+	clients := make(map[string]pb.RaftServiceClient, len(s.peerClients))
+	for addr, client := range s.peerClients {
+		clients[addr] = client
+	}
+	s.peerMu.RUnlock()
 
+	currentTerm := s.node.CurrentTerm()
+	candidateID := s.node.ID()
+	lastLogIndex := s.node.LastLogIndex()
+	lastLogTerm := s.node.LastLogTerm()
+	needed := s.node.MajoritySize()
+
+	log.Printf("[%s] Starting election for term %d, need %d votes", candidateID, currentTerm, needed)
+
+	votes := 1
+
+	if votes >= needed {
+		log.Printf("[%s] Single node cluster, becoming Leader for term %d", candidateID, currentTerm)
+		s.node.BecomeLeader()
+		return
+	}
+
+	if len(clients) == 0 {
+		log.Printf("[%s] No connected peers to request votes from", candidateID)
+		return
+	}
+
+	type voteResult struct {
+		peerAddr    string
+		term        uint64
+		voteGranted bool
+		err         error
+	}
+
+	results := make(chan voteResult, len(clients))
+
+	for addr, client := range clients {
+		go func(peerAddr string, c pb.RaftServiceClient) {
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			req := &pb.RequestVoteRequest{
+				Term:         currentTerm,
+				CandidateId:  candidateID,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
+			}
+			resp, err := c.RequestVote(ctx, req)
+			if err != nil {
+				results <- voteResult{peerAddr: peerAddr, err: err}
+				return
+			}
+			results <- voteResult{peerAddr: peerAddr, term: resp.Term, voteGranted: resp.VoteGranted}
+		}(addr, client)
+	}
+	votesReceived := 0
+	for votesReceived < len(clients) {
+		result := <-results
+		votesReceived++
+
+		if s.node.State() != Candidate || s.node.CurrentTerm() != currentTerm {
+			log.Printf("[%s] No longer a Candidate, stopping election processing", candidateID)
+			return
+		}
+		if result.err != nil {
+			log.Printf("[%s] Vote request to %s failed: %v", candidateID, result.peerAddr, result.err)
+			continue
+		}
+		if result.term > currentTerm {
+			log.Printf("[%s] Discovered higher term %d from %s, stepping down", candidateID, result.term, result.peerAddr)
+			s.node.BecomeFollower(result.term)
+			return
+		}
+		if result.voteGranted {
+			votes++
+			log.Printf("[%s] Received vote from %s (total votes: %d)", candidateID, result.peerAddr, votes)
+
+			if votes >= needed {
+				log.Printf("[%s] Received majority votes, becoming Leader for term %d", candidateID, currentTerm)
+				s.node.BecomeLeader()
+				return
+			}
+
+		} else {
+			log.Printf("[%s] Vote denied by %s", candidateID, result.peerAddr)
+		}
+	}
+	log.Printf("[%s] Election concluded for term %d with %d votes (needed %d)", candidateID, currentTerm, votes, needed)
 }
 func (s *Server) sendHeartbeats() {
 	s.peerMu.RLock()
@@ -175,15 +260,15 @@ func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*
 	log.Printf("[%s] Received RequestVote from %s (term: %d, lastLogIndex: %d, lastLogTerm: %d)",
 		s.node.ID(), req.CandidateId, req.Term, req.LastLogIndex, req.LastLogTerm)
 
-	currentTerm := s.node.CurrentTerm()
-	if req.Term > currentTerm {
-		s.node.BecomeFollower(req.Term)
-		currentTerm = req.Term
+	voteGranted, currentTerm := s.node.CanGrantVote(req.CandidateId, req.Term, req.LastLogIndex, req.LastLogTerm)
+
+	if voteGranted {
+		s.node.ResetElectionTimer()
 	}
 
 	response := &pb.RequestVoteResponse{
 		Term:        currentTerm,
-		VoteGranted: false,
+		VoteGranted: voteGranted,
 	}
 
 	log.Printf("[%s] RequestVote response: term=%d, voteGranted=%v",

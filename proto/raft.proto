@@ -9,10 +9,21 @@ enum NodeState {
     LEADER = 2;
 }
 
+enum CommandType {
+  SET = 0;
+  DELETE = 1;
+}
+
+message Command {
+  CommandType type = 1;
+  string key = 2;
+  string value = 3;
+}
+
 message LogEntry {
     uint64 term = 1;
     uint64 index = 2;
-    bytes command = 3;
+    Command command = 3;
 }
 
 message RequestVoteRequest {

@@ -49,7 +49,7 @@ type node struct {
 	id          string
 	currentTerm uint64
 	votedFor    string
-	log         []pb.LogEntry
+	log         []*pb.LogEntry
 
 	state       NodeState
 	commitIndex uint64
@@ -76,7 +76,7 @@ func NewNode(id, address string, peers []string) *node {
 		address:     address,
 		currentTerm: 0,
 		votedFor:    "",
-		log:         make([]pb.LogEntry, 0),
+		log:         make([]*pb.LogEntry, 0),
 		state:       Follower,
 		commitIndex: 0,
 		lastApplied: 0,
@@ -401,4 +401,140 @@ func (n *node) ClusterSize() int {
 }
 func (n *node) MajoritySize() int {
 	return (n.ClusterSize() / 2) + 1
+}
+
+func (n *node) AppendCommand(cmd *pb.Command) uint64 {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	newIndex := uint64(len(n.log) + 1)
+	entry := &pb.LogEntry{
+		Index:   newIndex,
+		Term:    n.currentTerm,
+		Command: cmd,
+	}
+	n.log = append(n.log, entry)
+	log.Printf("[%s] Appended entry: index=%d, term=%d, cmd=%s %s", n.id, newIndex, n.currentTerm, cmd.Type, cmd.Key)
+	return newIndex
+}
+
+func (n *node) GetLogEntry(index uint64) *pb.LogEntry {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if index == 0 || index > uint64(len(n.log)) {
+		return nil
+	}
+	return n.log[index-1]
+}
+
+func (n *node) GetLogEntries(startIndex uint64) []*pb.LogEntry {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if startIndex == 0 {
+		startIndex = 1
+	}
+	if startIndex > uint64(len(n.log)) {
+		return []*pb.LogEntry{}
+	}
+	return n.log[startIndex-1:]
+}
+
+func (n *node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if prevLogIndex == 0 {
+		return true
+	}
+	if prevLogIndex > uint64(len(n.log)) {
+		return false
+	}
+	return n.log[prevLogIndex-1].Term == prevLogTerm
+}
+
+func (n *node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if len(entries) == 0 {
+		return true
+	}
+
+	insertIndex := int(prevLogIndex)
+
+	for _, entry := range entries {
+		if insertIndex < len(n.log) {
+			if n.log[insertIndex].Term != entry.Term {
+				log.Printf("[%s] Log conflict at index %d: deleting entries from index %d onwards", n.id, entry.Index, insertIndex+1)
+				n.log = n.log[:insertIndex]
+			} else {
+				insertIndex++
+				continue
+			}
+		}
+		n.log = append(n.log, entry)
+		log.Printf("[%s] Appended entry from leader: index=%d, term=%d", n.id, entry.Index, entry.Term)
+		insertIndex++
+	}
+
+	return true
+}
+
+func (n *node) GetNextIndex(peerAddr string) uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if idx, ok := n.nextIndex[peerAddr]; ok {
+		return idx
+	}
+	return uint64(len(n.log)) + 1
+}
+
+func (n *node) SetNextIndex(peerAddr string, index uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.nextIndex[peerAddr] = index
+}
+
+func (n *node) GetMatchIndex(peerAddr string) uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.matchIndex[peerAddr]
+}
+
+func (n *node) SetMatchIndex(peerAddr string, index uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.matchIndex[peerAddr] = index
+}
+
+func (n *node) CommitIndex() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.commitIndex
+}
+
+func (n *node) SetCommitIndex(index uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if index > n.commitIndex {
+		log.Printf("[%s] Updated commitIndex: %d -> %d", n.id, n.commitIndex, index)
+		n.commitIndex = index
+	}
+}
+
+func (n *node) LogLength() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return uint64(len(n.log))
+}
+
+func (n *node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint64) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	prevLogIndex = nextIndex - 1
+	if prevLogIndex > 0 && prevLogIndex <= uint64(len(n.log)) {
+		prevLogTerm = n.log[prevLogIndex-1].Term
+	}
+	return prevLogIndex, prevLogTerm
 }

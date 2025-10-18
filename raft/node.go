@@ -249,7 +249,7 @@ func (n *node) BecomeLeader() {
 	id := n.id
 
 	for _, peer := range n.peers {
-		n.nextIndex[peer] = uint64(len(n.log))
+		n.nextIndex[peer] = uint64(len(n.log)) + 1
 		n.matchIndex[peer] = 0
 	}
 	n.mu.Unlock()

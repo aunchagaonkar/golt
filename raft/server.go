@@ -225,20 +225,26 @@ func (s *Server) sendHeartbeats() {
 
 	currentTerm := s.node.CurrentTerm()
 	leaderID := s.node.ID()
+	commitIndex := s.node.CommitIndex()
 
 	log.Printf("[%s] Sending heartbeats to %d peers (term: %d)", leaderID, len(clients), currentTerm)
 
 	for addr, client := range clients {
 		go func(peerAddr string, c pb.RaftServiceClient) {
+
+			nextIndex := s.node.GetNextIndex(peerAddr)
+			entries := s.node.GetLogEntries(nextIndex)
+			prevLogIndex, prevLogTerm := s.node.GetPrevLogInfo(nextIndex)
+
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 			req := &pb.AppendEntriesRequest{
 				Term:         currentTerm,
 				LeaderId:     leaderID,
-				PrevLogIndex: 0,
-				PrevLogTerm:  0,
-				Entries:      nil,
-				LeaderCommit: 0,
+				PrevLogIndex: prevLogIndex,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      entries,
+				LeaderCommit: commitIndex,
 			}
 			resp, err := c.AppendEntries(ctx, req)
 
@@ -248,9 +254,23 @@ func (s *Server) sendHeartbeats() {
 			}
 
 			if resp.Term > currentTerm {
-				log.Printf("[%s] Discovered higher term %d from %s, stepping down",
-					leaderID, resp.Term, peerAddr)
+				log.Printf("[%s] Discovered higher term %d from %s, stepping down", leaderID, resp.Term, peerAddr)
 				s.node.BecomeFollower(resp.Term)
+				return
+			}
+
+			if resp.Success {
+				if len(entries) > 0 {
+					lastEntry := entries[len(entries)-1]
+					s.node.SetNextIndex(peerAddr, lastEntry.Index+1)
+					s.node.SetMatchIndex(peerAddr, lastEntry.Index)
+					log.Printf("[%s] Peer %s replicated entries up to index %d", leaderID, peerAddr, lastEntry.Index)
+				}
+			} else {
+				if nextIndex > 1 {
+					s.node.SetNextIndex(peerAddr, nextIndex-1)
+					log.Printf("[%s] Peer %s log mismatch, decremented nextIndex to %d", leaderID, peerAddr, nextIndex-1)
+				}
 			}
 		}(addr, client)
 	}
@@ -279,10 +299,12 @@ func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*
 
 func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
 	currentTerm := s.node.CurrentTerm()
+	currentState := s.node.State()
 
-	if len(req.Entries) == 0 {
-		log.Printf("[%s] Received heartbeat from %s (term: %d)",
-			s.node.ID(), req.LeaderId, req.Term)
+	isHeartbeat := len(req.Entries) == 0
+	if isHeartbeat {
+		log.Printf("[%s] Received heartbeat from %s (term: %d, prevLogIndex: %d)",
+			s.node.ID(), req.LeaderId, req.Term, req.PrevLogIndex)
 	} else {
 		log.Printf("[%s] Received AppendEntries from %s (term: %d, prevLogIndex: %d, entries: %d)",
 			s.node.ID(), req.LeaderId, req.Term, req.PrevLogIndex, len(req.Entries))
@@ -291,21 +313,52 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 	if req.Term < currentTerm {
 		log.Printf("[%s] Rejecting AppendEntries: leader term %d < current term %d",
 			s.node.ID(), req.Term, currentTerm)
-		return &pb.AppendEntriesResponse{Term: currentTerm, Success: false}, nil
+
+		return &pb.AppendEntriesResponse{
+			Term:    currentTerm,
+			Success: false,
+		}, nil
 	}
 
-	if req.Term > currentTerm || s.node.State() != Follower {
-		s.node.BecomeFollower(req.Term)
+	if req.Term >= currentTerm {
+		if req.Term > currentTerm || currentState != Follower {
+			s.node.BecomeFollower(req.Term)
+		}
+		s.node.ResetElectionTimer()
 	}
-	s.node.ResetElectionTimer()
+
+	if !s.node.MatchesPrevLog(req.PrevLogIndex, req.PrevLogTerm) {
+		log.Printf("[%s] Log mismatch at prevLogIndex=%d, prevLogTerm=%d",
+			s.node.ID(), req.PrevLogIndex, req.PrevLogTerm)
+		return &pb.AppendEntriesResponse{
+			Term:    s.node.CurrentTerm(),
+			Success: false,
+		}, nil
+	}
+
+	if len(req.Entries) > 0 {
+		s.node.AppendEntriesToLog(req.PrevLogIndex, req.Entries)
+	}
+
+	if req.LeaderCommit > s.node.CommitIndex() {
+		lastNewIndex := req.PrevLogIndex + uint64(len(req.Entries))
+		if lastNewIndex == 0 {
+			lastNewIndex = s.node.LogLength()
+		}
+		newCommitIndex := min(lastNewIndex, req.LeaderCommit)
+		if newCommitIndex > 0 {
+			s.node.SetCommitIndex(newCommitIndex)
+		}
+	}
 
 	response := &pb.AppendEntriesResponse{
 		Term:    s.node.CurrentTerm(),
 		Success: true,
 	}
 
-	log.Printf("[%s] AppendEntries response: term=%d, success=%v",
-		s.node.ID(), response.Term, response.Success)
+	if !isHeartbeat {
+		log.Printf("[%s] AppendEntries success: appended %d entries", s.node.ID(), len(req.Entries))
+	}
 
 	return response, nil
 }

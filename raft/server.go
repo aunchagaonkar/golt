@@ -265,6 +265,7 @@ func (s *Server) sendHeartbeats() {
 					s.node.SetNextIndex(peerAddr, lastEntry.Index+1)
 					s.node.SetMatchIndex(peerAddr, lastEntry.Index)
 					log.Printf("[%s] Peer %s replicated entries up to index %d", leaderID, peerAddr, lastEntry.Index)
+					s.node.UpdateCommitIndex()
 				}
 			} else {
 				if nextIndex > 1 {

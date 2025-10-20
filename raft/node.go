@@ -3,6 +3,7 @@ package raft
 import (
 	"log"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -537,4 +538,36 @@ func (n *node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint6
 		prevLogTerm = n.log[prevLogIndex-1].Term
 	}
 	return prevLogIndex, prevLogTerm
+}
+
+func (n *node) UpdateCommitIndex() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.state != Leader {
+		return
+	}
+
+	matchIndices := make([]uint64, 0, len(n.peers)+1)
+	matchIndices = append(matchIndices, uint64(len(n.log)))
+	for _, idx := range n.matchIndex {
+		matchIndices = append(matchIndices, idx)
+	}
+
+	sort.Slice(matchIndices, func(i, j int) bool {
+		return matchIndices[i] > matchIndices[j]
+	})
+
+	majorityIdx := len(n.peers) / 2
+	N := matchIndices[majorityIdx]
+
+	if N > n.commitIndex {
+		if N > 0 && N <= uint64(len(n.log)) {
+			if n.log[N-1].Term == n.currentTerm {
+				log.Printf("[%s] CommitIndex updated: %d -> %d (majority reached)",
+					n.id, n.commitIndex, N)
+				n.commitIndex = N
+			}
+		}
+	}
 }

@@ -15,7 +15,7 @@ import (
 
 type Server struct {
 	pb.UnimplementedRaftServiceServer
-	node       *node
+	node       *Node
 	grpcServer *grpc.Server
 	listener   net.Listener
 
@@ -24,7 +24,7 @@ type Server struct {
 	peerConns   map[string]*grpc.ClientConn
 }
 
-func NewServer(node *node) *Server {
+func NewServer(node *Node) *Server {
 	s := &Server{
 		node:        node,
 		peerClients: make(map[string]pb.RaftServiceClient),
@@ -117,7 +117,7 @@ func (s *Server) Stop() {
 	}
 }
 
-func (s *Server) Node() *node {
+func (s *Server) Node() *Node {
 	return s.node
 }
 

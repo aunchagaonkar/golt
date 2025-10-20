@@ -44,7 +44,7 @@ func (state NodeState) ToProto() pb.NodeState {
 	}
 }
 
-type node struct {
+type Node struct {
 	mu sync.RWMutex
 
 	id          string
@@ -71,8 +71,8 @@ type node struct {
 	onSendHeartbeat   func()
 }
 
-func NewNode(id, address string, peers []string) *node {
-	return &node{
+func NewNode(id, address string, peers []string) *Node {
+	return &Node{
 		id:          id,
 		address:     address,
 		currentTerm: 0,
@@ -89,59 +89,59 @@ func NewNode(id, address string, peers []string) *node {
 	}
 }
 
-func (n *node) ID() string {
+func (n *Node) ID() string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.id
 }
 
-func (n *node) Address() string {
+func (n *Node) Address() string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.address
 }
-func (n *node) State() NodeState {
+func (n *Node) State() NodeState {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.state
 }
 
-func (n *node) CurrentTerm() uint64 {
+func (n *Node) CurrentTerm() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.currentTerm
 }
-func (n *node) VotedFor() string {
+func (n *Node) VotedFor() string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.votedFor
 }
-func (n *node) Peers() []string {
+func (n *Node) Peers() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.peers
 }
-func (n *node) SetState(state NodeState) {
+func (n *Node) SetState(state NodeState) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.state = state
 }
-func (n *node) SetVotedFor(candidateID string) {
+func (n *Node) SetVotedFor(candidateID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.votedFor = candidateID
 }
-func (n *node) SetCallbacks(onBecomeCandidate func(), onSendHeartbeat func()) {
+func (n *Node) SetCallbacks(onBecomeCandidate func(), onSendHeartbeat func()) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.onBecomeCandidate = onBecomeCandidate
 	n.onSendHeartbeat = onSendHeartbeat
 }
-func (n *node) RandomElectionTimeout() time.Duration {
+func (n *Node) RandomElectionTimeout() time.Duration {
 	diff := maxElectionTime - minElectionTime
 	return minElectionTime + time.Duration(rand.Int63n(int64(diff)))
 }
-func (n *node) StartElectionTimer() {
+func (n *Node) StartElectionTimer() {
 	n.mu.Lock()
 	if n.running {
 		n.mu.Unlock()
@@ -156,7 +156,7 @@ func (n *node) StartElectionTimer() {
 	log.Printf("[%s] Starting election timer (timeout: %v)", n.id, timeout)
 	go n.ElectionTimerLoop()
 }
-func (n *node) ElectionTimerLoop() {
+func (n *Node) ElectionTimerLoop() {
 	for {
 		n.mu.RLock()
 		timer := n.electionTimer
@@ -172,7 +172,7 @@ func (n *node) ElectionTimerLoop() {
 		}
 	}
 }
-func (n *node) HandleElectionTimeout() {
+func (n *Node) HandleElectionTimeout() {
 	n.mu.Lock()
 
 	if n.state == Leader {
@@ -199,7 +199,7 @@ func (n *node) HandleElectionTimeout() {
 	}
 }
 
-func (n *node) ResetElectionTimer() {
+func (n *Node) ResetElectionTimer() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.electionTimer == nil {
@@ -217,7 +217,7 @@ func (n *node) ResetElectionTimer() {
 	log.Printf("[%s] Election timer reset (new timeout: %v)", n.id, timeout)
 }
 
-func (n *node) BecomeFollower(term uint64) {
+func (n *Node) BecomeFollower(term uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -238,7 +238,7 @@ func (n *node) BecomeFollower(term uint64) {
 	}
 }
 
-func (n *node) BecomeLeader() {
+func (n *Node) BecomeLeader() {
 	n.mu.Lock()
 
 	if n.state == Leader {
@@ -259,7 +259,7 @@ func (n *node) BecomeLeader() {
 	n.StartHeartbeatLoop()
 }
 
-func (n *node) StartHeartbeatLoop() {
+func (n *Node) StartHeartbeatLoop() {
 	n.mu.Lock()
 	n.heartbeatTicker = time.NewTicker(heartbeatTime)
 	ticker := n.heartbeatTicker
@@ -292,7 +292,7 @@ func (n *node) StartHeartbeatLoop() {
 	}()
 }
 
-func (n *node) StopTimers() {
+func (n *Node) StopTimers() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if !n.running {
@@ -313,7 +313,7 @@ func (n *node) StopTimers() {
 	log.Printf("[%s] All timers stopped", n.id)
 }
 
-func (n *node) LastLogIndex() uint64 {
+func (n *Node) LastLogIndex() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if len(n.log) == 0 {
@@ -322,7 +322,7 @@ func (n *node) LastLogIndex() uint64 {
 	return n.log[len(n.log)-1].Index
 }
 
-func (n *node) LastLogTerm() uint64 {
+func (n *Node) LastLogTerm() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if len(n.log) == 0 {
@@ -331,7 +331,7 @@ func (n *node) LastLogTerm() uint64 {
 	return n.log[len(n.log)-1].Term
 }
 
-func (n *node) IsLogUpToDate(candidateLastLogIndex, candidateLastLogTerm uint64) bool {
+func (n *Node) IsLogUpToDate(candidateLastLogIndex, candidateLastLogTerm uint64) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -347,7 +347,7 @@ func (n *node) IsLogUpToDate(candidateLastLogIndex, candidateLastLogTerm uint64)
 	return candidateLastLogIndex >= myLastLogIndex
 }
 
-func (n *node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogIndex, candidateLastLogTerm uint64) (voteGranted bool, currTerm uint64) {
+func (n *Node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogIndex, candidateLastLogTerm uint64) (voteGranted bool, currTerm uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -395,16 +395,16 @@ func (n *node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogI
 	return true, currTerm
 }
 
-func (n *node) ClusterSize() int {
+func (n *Node) ClusterSize() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return len(n.peers) + 1
 }
-func (n *node) MajoritySize() int {
+func (n *Node) MajoritySize() int {
 	return (n.ClusterSize() / 2) + 1
 }
 
-func (n *node) AppendCommand(cmd *pb.Command) uint64 {
+func (n *Node) AppendCommand(cmd *pb.Command) uint64 {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -419,7 +419,7 @@ func (n *node) AppendCommand(cmd *pb.Command) uint64 {
 	return newIndex
 }
 
-func (n *node) GetLogEntry(index uint64) *pb.LogEntry {
+func (n *Node) GetLogEntry(index uint64) *pb.LogEntry {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if index == 0 || index > uint64(len(n.log)) {
@@ -428,7 +428,7 @@ func (n *node) GetLogEntry(index uint64) *pb.LogEntry {
 	return n.log[index-1]
 }
 
-func (n *node) GetLogEntries(startIndex uint64) []*pb.LogEntry {
+func (n *Node) GetLogEntries(startIndex uint64) []*pb.LogEntry {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if startIndex == 0 {
@@ -440,7 +440,7 @@ func (n *node) GetLogEntries(startIndex uint64) []*pb.LogEntry {
 	return n.log[startIndex-1:]
 }
 
-func (n *node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
+func (n *Node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	if prevLogIndex == 0 {
@@ -452,7 +452,7 @@ func (n *node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
 	return n.log[prevLogIndex-1].Term == prevLogTerm
 }
 
-func (n *node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) bool {
+func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -480,7 +480,7 @@ func (n *node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) b
 	return true
 }
 
-func (n *node) GetNextIndex(peerAddr string) uint64 {
+func (n *Node) GetNextIndex(peerAddr string) uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -490,31 +490,31 @@ func (n *node) GetNextIndex(peerAddr string) uint64 {
 	return uint64(len(n.log)) + 1
 }
 
-func (n *node) SetNextIndex(peerAddr string, index uint64) {
+func (n *Node) SetNextIndex(peerAddr string, index uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.nextIndex[peerAddr] = index
 }
 
-func (n *node) GetMatchIndex(peerAddr string) uint64 {
+func (n *Node) GetMatchIndex(peerAddr string) uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.matchIndex[peerAddr]
 }
 
-func (n *node) SetMatchIndex(peerAddr string, index uint64) {
+func (n *Node) SetMatchIndex(peerAddr string, index uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.matchIndex[peerAddr] = index
 }
 
-func (n *node) CommitIndex() uint64 {
+func (n *Node) CommitIndex() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.commitIndex
 }
 
-func (n *node) SetCommitIndex(index uint64) {
+func (n *Node) SetCommitIndex(index uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if index > n.commitIndex {
@@ -523,13 +523,13 @@ func (n *node) SetCommitIndex(index uint64) {
 	}
 }
 
-func (n *node) LogLength() uint64 {
+func (n *Node) LogLength() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return uint64(len(n.log))
 }
 
-func (n *node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint64) {
+func (n *Node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint64) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -540,7 +540,7 @@ func (n *node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint6
 	return prevLogIndex, prevLogTerm
 }
 
-func (n *node) UpdateCommitIndex() {
+func (n *Node) UpdateCommitIndex() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 

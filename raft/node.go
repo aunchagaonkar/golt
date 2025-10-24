@@ -51,6 +51,7 @@ type Node struct {
 	currentTerm uint64
 	votedFor    string
 	log         []*pb.LogEntry
+	kvStore     map[string]string
 
 	state       NodeState
 	commitIndex uint64
@@ -78,6 +79,7 @@ func NewNode(id, address string, peers []string) *Node {
 		currentTerm: 0,
 		votedFor:    "",
 		log:         make([]*pb.LogEntry, 0),
+		kvStore:     make(map[string]string),
 		state:       Follower,
 		commitIndex: 0,
 		lastApplied: 0,
@@ -520,6 +522,7 @@ func (n *Node) SetCommitIndex(index uint64) {
 	if index > n.commitIndex {
 		log.Printf("[%s] Updated commitIndex: %d -> %d", n.id, n.commitIndex, index)
 		n.commitIndex = index
+		n.applyLog()
 	}
 }
 
@@ -567,7 +570,38 @@ func (n *Node) UpdateCommitIndex() {
 				log.Printf("[%s] CommitIndex updated: %d -> %d (majority reached)",
 					n.id, n.commitIndex, N)
 				n.commitIndex = N
+				n.applyLog()
 			}
 		}
 	}
+}
+
+func (n *Node) applyLog() {
+	for n.commitIndex > n.lastApplied {
+		n.lastApplied++
+		entry := n.log[n.lastApplied-1]
+
+		if entry.Command == nil {
+			continue
+		}
+
+		key := entry.Command.Key
+		val := entry.Command.Value
+
+		switch entry.Command.Type {
+		case pb.CommandType_SET:
+			n.kvStore[key] = val
+			log.Printf("[%s] Applied: SET %s=%s (index=%d)", n.id, key, val, n.lastApplied)
+		case pb.CommandType_DELETE:
+			delete(n.kvStore, key)
+			log.Printf("[%s] Applied: DELETE %s (index=%d)", n.id, key, n.lastApplied)
+		}
+	}
+}
+
+func (n *Node) GetValue(key string) (string, bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	val, ok := n.kvStore[key]
+	return val, ok
 }

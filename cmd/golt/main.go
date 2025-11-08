@@ -15,6 +15,7 @@ func main() {
 	id := flag.String("id", "", "Unique node ID (required)")
 	address := flag.String("address", "", "Address to listen on, e.g. localhost:8001 (required)")
 	peers := flag.String("peers", "", "Comma-separated list of peer addresses, e.g. localhost:8002,localhost:8003")
+	dataDir := flag.String("data", "", "Directory for storing data")
 	flag.Parse()
 
 	if *id == "" {
@@ -22,6 +23,9 @@ func main() {
 	}
 	if *address == "" {
 		log.Fatal("Error: -address flag is required")
+	}
+	if *dataDir == "" {
+		*dataDir = "/tmp/golt-" + *id
 	}
 	var peerList []string
 	if *peers != "" {
@@ -33,8 +37,9 @@ func main() {
 
 	log.Printf("Starting Golt node %s on %s", *id, *address)
 	log.Printf("Peers: %v", peerList)
+	log.Printf("Data Directory: %s", *dataDir)
 
-	node := raft.NewNode(*id, *address, peerList)
+	node := raft.NewNode(*id, *address, peerList, *dataDir)
 	server := raft.NewServer(node)
 	if err := server.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

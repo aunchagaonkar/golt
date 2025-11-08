@@ -52,6 +52,7 @@ type Node struct {
 	votedFor    string
 	log         []*pb.LogEntry
 	kvStore     map[string]string
+	wal         *WAL
 
 	state       NodeState
 	commitIndex uint64
@@ -72,13 +73,25 @@ type Node struct {
 	onSendHeartbeat   func()
 }
 
-func NewNode(id, address string, peers []string) *Node {
+func NewNode(id, address string, peers []string, storageDir string) *Node {
+	wal, err := OpenWAL(storageDir)
+	if err != nil {
+		log.Fatalf("[%s] Failed to open WAL: %v", id, err)
+	}
+
+	entries, err := wal.ReadAll()
+	if err != nil {
+		log.Fatalf("[%s] Failed to read WAL: %v", id, err)
+	}
+	log.Printf("[%s] Recovered %d entries from WAL", id, len(entries))
+
 	return &Node{
 		id:          id,
 		address:     address,
 		currentTerm: 0,
 		votedFor:    "",
-		log:         make([]*pb.LogEntry, 0),
+		log:         entries,
+		wal:         wal,
 		kvStore:     make(map[string]string),
 		state:       Follower,
 		commitIndex: 0,
@@ -416,6 +429,14 @@ func (n *Node) AppendCommand(cmd *pb.Command) uint64 {
 		Term:    n.currentTerm,
 		Command: cmd,
 	}
+	if err := n.wal.Append(entry); err != nil {
+		log.Printf("[%s] WAL Append failed: %v", n.id, err)
+		return 0
+	}
+	if err := n.wal.Sync(); err != nil {
+		log.Printf("[%s] WAL Sync failed: %v", n.id, err)
+		return 0
+	}
 	n.log = append(n.log, entry)
 	log.Printf("[%s] Appended entry: index=%d, term=%d, cmd=%s %s", n.id, newIndex, n.currentTerm, cmd.Type, cmd.Key)
 	return newIndex
@@ -468,11 +489,19 @@ func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) b
 		if insertIndex < len(n.log) {
 			if n.log[insertIndex].Term != entry.Term {
 				log.Printf("[%s] Log conflict at index %d: deleting entries from index %d onwards", n.id, entry.Index, insertIndex+1)
+				if err := n.wal.Truncate(uint64(insertIndex) + 1); err != nil {
+					log.Printf("[%s] WAL Truncate failed: %v", n.id, err)
+					return false
+				}
 				n.log = n.log[:insertIndex]
 			} else {
 				insertIndex++
 				continue
 			}
+		}
+		if err := n.wal.Append(entry); err != nil {
+			log.Printf("[%s] WAL Append failed: %v", n.id, err)
+			return false
 		}
 		n.log = append(n.log, entry)
 		log.Printf("[%s] Appended entry from leader: index=%d, term=%d", n.id, entry.Index, entry.Term)

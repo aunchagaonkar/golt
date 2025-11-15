@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,7 +46,8 @@ func testChaos() {
 	var mu sync.Mutex
 
 	for _, cfg := range nodes {
-		node := raft.NewNode(cfg.id, cfg.address, cfg.peers)
+		dir, _ := os.MkdirTemp("", "golt-chaos-"+cfg.id)
+		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
 		server := raft.NewServer(node)
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)

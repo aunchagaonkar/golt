@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/aunchagaonkar/golt/raft"
@@ -43,7 +44,8 @@ func testLeaderElection(numNodes int) {
 
 	servers := make([]*raft.Server, 0, numNodes)
 	for _, cfg := range nodes {
-		node := raft.NewNode(cfg.id, cfg.address, cfg.peers)
+		dir, _ := os.MkdirTemp("", "golt-leader-"+cfg.id)
+		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
 		server := raft.NewServer(node)
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)

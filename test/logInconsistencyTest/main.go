@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	pb "github.com/aunchagaonkar/golt/proto"
@@ -34,7 +35,8 @@ func testLogRepair() {
 	serverMap := make(map[string]*raft.Server)
 
 	for _, cfg := range nodes {
-		node := raft.NewNode(cfg.id, cfg.address, cfg.peers)
+		dir, _ := os.MkdirTemp("", "golt-logincon"+cfg.id)
+		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
 		server := raft.NewServer(node)
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)

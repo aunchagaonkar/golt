@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	pb "github.com/aunchagaonkar/golt/proto"
@@ -30,7 +31,8 @@ func main() {
 	}
 	servers := make([]*raft.Server, 0, len(nodes))
 	for _, cfg := range nodes {
-		node := raft.NewNode(cfg.id, cfg.address, cfg.peers)
+		dir, _ := os.MkdirTemp("", "golt-ping-"+cfg.id)
+		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
 		server := raft.NewServer(node)
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)

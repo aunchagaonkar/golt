@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/aunchagaonkar/golt/raft"
@@ -26,7 +27,10 @@ func main() {
 }
 
 func testSingleNodeElectionTimeout() {
-	node := raft.NewNode("test-node", "localhost:9010", []string{})
+	dir, _ := os.MkdirTemp("", "golt-elect-node1")
+	defer os.RemoveAll(dir)
+
+	node := raft.NewNode("node1", "localhost:8001", []string{}, dir)
 	server := raft.NewServer(node)
 
 	if err := server.Start(); err != nil {
@@ -78,7 +82,8 @@ func testHeartbeatPreventsElection() {
 
 	servers := make([]*raft.Server, 0, len(nodes))
 	for _, cfg := range nodes {
-		node := raft.NewNode(cfg.id, cfg.address, cfg.peers)
+		dir, _ := os.MkdirTemp("", "golt-elect-prev-"+cfg.id)
+		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
 		server := raft.NewServer(node)
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)

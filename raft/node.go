@@ -53,6 +53,7 @@ type Node struct {
 	log         []*pb.LogEntry
 	kvStore     map[string]string
 	wal         *WAL
+	metaStore   *MetaStore
 
 	state       NodeState
 	commitIndex uint64
@@ -85,13 +86,21 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 	}
 	log.Printf("[%s] Recovered %d entries from WAL", id, len(entries))
 
+	metaStore := OpenMetaStore(storageDir)
+	meta, err := metaStore.Load()
+	if err != nil {
+		log.Fatalf("[%s] Failed to load metadata: %v", id, err)
+	}
+	log.Printf("[%s] Loaded metadata: Term=%d, VotedFor=%s", id, meta.CurrentTerm, meta.VotedFor)
+
 	return &Node{
 		id:          id,
 		address:     address,
-		currentTerm: 0,
-		votedFor:    "",
+		currentTerm: meta.CurrentTerm,
+		votedFor:    meta.VotedFor,
 		log:         entries,
 		wal:         wal,
+		metaStore:   metaStore,
 		kvStore:     make(map[string]string),
 		state:       Follower,
 		commitIndex: 0,
@@ -199,6 +208,7 @@ func (n *Node) HandleElectionTimeout() {
 	n.state = Candidate
 	n.currentTerm++
 	n.votedFor = n.id
+	n.saveMeta()
 
 	term := n.currentTerm
 	id := n.id
@@ -242,6 +252,7 @@ func (n *Node) BecomeFollower(term uint64) {
 	n.state = Follower
 	n.currentTerm = term
 	n.votedFor = ""
+	n.saveMeta()
 
 	if n.heartbeatTicker != nil {
 		n.heartbeatTicker.Stop()
@@ -377,6 +388,7 @@ func (n *Node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogI
 		log.Printf("[%s] Updating term from %d to %d from RequestVote", n.id, n.currentTerm, candidateTerm)
 		n.currentTerm = candidateTerm
 		n.votedFor = ""
+		n.saveMeta()
 		n.state = Follower
 		currTerm = n.currentTerm
 	}
@@ -406,6 +418,7 @@ func (n *Node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogI
 	}
 
 	n.votedFor = candidateID
+	n.saveMeta()
 	log.Printf("[%s] Granting vote for %s in term %d", n.id, candidateID, n.currentTerm)
 	return true, currTerm
 }
@@ -633,4 +646,14 @@ func (n *Node) GetValue(key string) (string, bool) {
 	defer n.mu.RUnlock()
 	val, ok := n.kvStore[key]
 	return val, ok
+}
+
+func (n *Node) saveMeta() {
+	meta := &Metadata{
+		CurrentTerm: n.currentTerm,
+		VotedFor:    n.votedFor,
+	}
+	if err := n.metaStore.Save(meta); err != nil {
+		log.Printf("[%s] Failed to save metadata: %v", n.id, err)
+	}
 }

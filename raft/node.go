@@ -8,6 +8,7 @@ import (
 	"time"
 
 	pb "github.com/aunchagaonkar/golt/proto"
+	"github.com/aunchagaonkar/golt/storage"
 )
 
 type NodeState int // role of node in raft
@@ -51,9 +52,9 @@ type Node struct {
 	currentTerm uint64
 	votedFor    string
 	log         []*pb.LogEntry
-	kvStore     map[string]string
 	wal         *WAL
 	metaStore   *MetaStore
+	lsmStore    *storage.LSMStore
 
 	state       NodeState
 	commitIndex uint64
@@ -93,6 +94,10 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 	}
 	log.Printf("[%s] Loaded metadata: Term=%d, VotedFor=%s", id, meta.CurrentTerm, meta.VotedFor)
 
+	lsmStore, err := storage.OpenLSMStore(storageDir, 1024*1024) // 1MB MemTable
+	if err != nil {
+		log.Fatalf("[%s] Failed to open LSM store: %v", id, err)
+	}
 	return &Node{
 		id:          id,
 		address:     address,
@@ -101,7 +106,7 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 		log:         entries,
 		wal:         wal,
 		metaStore:   metaStore,
-		kvStore:     make(map[string]string),
+		lsmStore:    lsmStore,
 		state:       Follower,
 		commitIndex: 0,
 		lastApplied: 0,
@@ -632,10 +637,14 @@ func (n *Node) applyLog() {
 
 		switch entry.Command.Type {
 		case pb.CommandType_SET:
-			n.kvStore[key] = val
+			if err := n.lsmStore.Put(key, val); err != nil {
+				log.Printf("[%s] Failed to apply SET: %v", n.id, err)
+			}
 			log.Printf("[%s] Applied: SET %s=%s (index=%d)", n.id, key, val, n.lastApplied)
 		case pb.CommandType_DELETE:
-			delete(n.kvStore, key)
+			if err := n.lsmStore.Delete(key); err != nil {
+				log.Printf("[%s] Failed to apply DELETE: %v", n.id, err)
+			}
 			log.Printf("[%s] Applied: DELETE %s (index=%d)", n.id, key, n.lastApplied)
 		}
 	}
@@ -644,8 +653,7 @@ func (n *Node) applyLog() {
 func (n *Node) GetValue(key string) (string, bool) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	val, ok := n.kvStore[key]
-	return val, ok
+	return n.lsmStore.Get(key)
 }
 
 func (n *Node) saveMeta() {

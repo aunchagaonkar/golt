@@ -161,6 +161,72 @@ func (w *WAL) ReadAll() ([]*pb.LogEntry, error) {
 	return entries, nil
 }
 
+func (w *WAL) Compact(keepEntries []*pb.LogEntry) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	tmpPath := w.path + ".new"
+	f, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to create compaction file: %w", err)
+	}
+
+	var newOffsets []int64
+
+	for _, entry := range keepEntries {
+		data, err := proto.Marshal(entry)
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("marshal failed during compaction: %w", err)
+		}
+
+		info, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return err
+		}
+		startOffset := info.Size()
+
+		lenBuf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(lenBuf, uint64(len(data)))
+		if _, err := f.Write(lenBuf); err != nil {
+			f.Close()
+			return err
+		}
+
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			return err
+		}
+
+		newOffsets = append(newOffsets, startOffset)
+	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	f.Close()
+
+	if err := w.file.Close(); err != nil {
+		return fmt.Errorf("failed to close old WAL: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, w.path); err != nil {
+		return fmt.Errorf("failed to rename compacted WAL: %w", err)
+	}
+
+	newF, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to reopen WAL: %w", err)
+	}
+
+	w.file = newF
+	w.offsets = newOffsets
+
+	return nil
+}
+
 func (w *WAL) Sync() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

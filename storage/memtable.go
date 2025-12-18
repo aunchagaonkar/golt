@@ -72,3 +72,13 @@ func (m *MemTable) Flush() ([]string, map[string]Entry) {
 
 	return keys, m.data
 }
+
+func (m *MemTable) GetAll() map[string]Entry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	copy := make(map[string]Entry, len(m.data))
+	for k, v := range m.data {
+		copy[k] = v
+	}
+	return copy
+}

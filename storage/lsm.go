@@ -132,3 +132,35 @@ func (s *LSMStore) Close() error {
 	s.flushMemTable()
 	return nil
 }
+
+func (s *LSMStore) GetAll() (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	fullState := make(map[string]string)
+
+	for i := len(s.sstables) - 1; i >= 0; i-- {
+		sst := s.sstables[i]
+		data, err := sst.Scan()
+		if err != nil {
+			return nil, err
+		}
+		for k, entry := range data {
+			if entry.Deleted {
+				delete(fullState, k)
+			} else {
+				fullState[k] = entry.Value
+			}
+		}
+	}
+
+	memData := s.memTable.GetAll()
+	for k, entry := range memData {
+		if entry.Deleted {
+			delete(fullState, k)
+		} else {
+			fullState[k] = entry.Value
+		}
+	}
+
+	return fullState, nil
+}

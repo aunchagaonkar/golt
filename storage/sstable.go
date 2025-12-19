@@ -106,3 +106,49 @@ func (s *SSTable) Search(key string) (string, bool, bool) {
 
 	return "", false, false
 }
+
+func (s *SSTable) Scan() (map[string]Entry, error) {
+	f, err := os.Open(s.path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data := make(map[string]Entry)
+
+	for {
+		var keyLen uint32
+		if err := binary.Read(f, binary.LittleEndian, &keyLen); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		keyBytes := make([]byte, keyLen)
+		if _, err := io.ReadFull(f, keyBytes); err != nil {
+			return nil, err
+		}
+		key := string(keyBytes)
+
+		var deletedByte uint8
+		if err := binary.Read(f, binary.LittleEndian, &deletedByte); err != nil {
+			return nil, err
+		}
+		deleted := deletedByte == 1
+
+		var valLen uint32
+		if err := binary.Read(f, binary.LittleEndian, &valLen); err != nil {
+			return nil, err
+		}
+
+		valBytes := make([]byte, valLen)
+		if _, err := io.ReadFull(f, valBytes); err != nil {
+			return nil, err
+		}
+		value := string(valBytes)
+
+		data[key] = Entry{Value: value, Deleted: deleted}
+	}
+	return data, nil
+}

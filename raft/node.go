@@ -48,17 +48,20 @@ func (state NodeState) ToProto() pb.NodeState {
 type Node struct {
 	mu sync.RWMutex
 
-	id          string
-	currentTerm uint64
-	votedFor    string
-	log         []*pb.LogEntry
-	wal         *WAL
-	metaStore   *MetaStore
-	lsmStore    *storage.LSMStore
+	id            string
+	currentTerm   uint64
+	votedFor      string
+	log           []*pb.LogEntry
+	wal           *WAL
+	metaStore     *MetaStore
+	lsmStore      *storage.LSMStore
+	snapshotStore *SnapshotStore
 
-	state       NodeState
-	commitIndex uint64
-	lastApplied uint64
+	state             NodeState
+	commitIndex       uint64
+	lastApplied       uint64
+	lastIncludedIndex uint64
+	lastIncludedTerm  uint64
 
 	nextIndex  map[string]uint64
 	matchIndex map[string]uint64
@@ -98,23 +101,51 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 	if err != nil {
 		log.Fatalf("[%s] Failed to open LSM store: %v", id, err)
 	}
+
+	snapshotStore := OpenSnapshotStore(storageDir)
+	snap, err := snapshotStore.LoadSnapshot()
+	if err != nil {
+		log.Fatalf("[%s] Failed to load snapshot: %v", id, err)
+	}
+
+	var lastIncludedIndex, lastIncludedTerm uint64
+	if snap != nil {
+		lastIncludedIndex = snap.LastIncludedIndex
+		lastIncludedTerm = snap.LastIncludedTerm
+		log.Printf("[%s] Loaded Snapshot (Index: %d, Term: %d)", id, lastIncludedIndex, lastIncludedTerm)
+		for k, v := range snap.Data {
+			lsmStore.Put(k, v)
+		}
+	}
+
+	var filteredLog []*pb.LogEntry
+	for _, entry := range entries {
+		if entry.Index > lastIncludedIndex {
+			filteredLog = append(filteredLog, entry)
+		}
+	}
+	log.Printf("[%s] Filtered log: %d entries remaining after snapshot (Index %d)", id, len(filteredLog), lastIncludedIndex)
+
 	return &Node{
-		id:          id,
-		address:     address,
-		currentTerm: meta.CurrentTerm,
-		votedFor:    meta.VotedFor,
-		log:         entries,
-		wal:         wal,
-		metaStore:   metaStore,
-		lsmStore:    lsmStore,
-		state:       Follower,
-		commitIndex: 0,
-		lastApplied: 0,
-		nextIndex:   make(map[string]uint64),
-		matchIndex:  make(map[string]uint64),
-		peers:       peers,
-		stopCh:      make(chan struct{}),
-		running:     false,
+		id:                id,
+		address:           address,
+		currentTerm:       meta.CurrentTerm,
+		votedFor:          meta.VotedFor,
+		log:               filteredLog,
+		wal:               wal,
+		metaStore:         metaStore,
+		lsmStore:          lsmStore,
+		snapshotStore:     snapshotStore,
+		state:             Follower,
+		commitIndex:       lastIncludedIndex,
+		lastApplied:       lastIncludedIndex,
+		lastIncludedIndex: lastIncludedIndex,
+		lastIncludedTerm:  lastIncludedTerm,
+		nextIndex:         make(map[string]uint64),
+		matchIndex:        make(map[string]uint64),
+		peers:             peers,
+		stopCh:            make(chan struct{}),
+		running:           false,
 	}
 }
 
@@ -279,9 +310,9 @@ func (n *Node) BecomeLeader() {
 	n.state = Leader
 	term := n.currentTerm
 	id := n.id
-
+	lastLogIndex := n.getLastLogIndex()
 	for _, peer := range n.peers {
-		n.nextIndex[peer] = uint64(len(n.log)) + 1
+		n.nextIndex[peer] = lastLogIndex + 1
 		n.matchIndex[peer] = 0
 	}
 	n.mu.Unlock()
@@ -344,33 +375,61 @@ func (n *Node) StopTimers() {
 	log.Printf("[%s] All timers stopped", n.id)
 }
 
+func (n *Node) getLastLogIndex() uint64 {
+	if len(n.log) > 0 {
+		return n.log[len(n.log)-1].Index
+	}
+	return n.lastIncludedIndex
+}
+
+func (n *Node) getLastLogTerm() uint64 {
+	if len(n.log) > 0 {
+		return n.log[len(n.log)-1].Term
+	}
+	return n.lastIncludedTerm
+}
+func (n *Node) getLogEntry(index uint64) *pb.LogEntry {
+	if index <= n.lastIncludedIndex {
+		return nil
+	}
+	offset := index - n.lastIncludedIndex - 1
+	if offset >= uint64(len(n.log)) {
+		return nil
+	}
+	return n.log[offset]
+}
+func (n *Node) getLogTerm(index uint64) uint64 {
+	if index == n.lastIncludedIndex {
+		return n.lastIncludedTerm
+	}
+	if index < n.lastIncludedIndex {
+		return 0
+	}
+	offset := index - n.lastIncludedIndex - 1
+	if offset >= uint64(len(n.log)) {
+		return 0
+	}
+	return n.log[offset].Term
+}
+
 func (n *Node) LastLogIndex() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	if len(n.log) == 0 {
-		return 0
-	}
-	return n.log[len(n.log)-1].Index
+	return n.getLastLogIndex()
 }
 
 func (n *Node) LastLogTerm() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	if len(n.log) == 0 {
-		return 0
-	}
-	return n.log[len(n.log)-1].Term
+	return n.getLastLogTerm()
 }
 
 func (n *Node) IsLogUpToDate(candidateLastLogIndex, candidateLastLogTerm uint64) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	var myLastLogTerm, myLastLogIndex uint64
-	if len(n.log) > 0 {
-		myLastLogTerm = n.log[len(n.log)-1].Term
-		myLastLogIndex = n.log[len(n.log)-1].Index
-	}
+	myLastLogTerm := n.getLastLogTerm()
+	myLastLogIndex := n.getLastLogIndex()
 
 	if candidateLastLogTerm != myLastLogTerm {
 		return candidateLastLogTerm > myLastLogTerm
@@ -404,11 +463,8 @@ func (n *Node) CanGrantVote(candidateID string, candidateTerm, candidateLastLogI
 		return false, currTerm
 	}
 
-	var myLastLogTerm, myLastLogIndex uint64
-	if len(n.log) > 0 {
-		myLastLogTerm = n.log[len(n.log)-1].Term
-		myLastLogIndex = n.log[len(n.log)-1].Index
-	}
+	myLastLogTerm := n.getLastLogTerm()
+	myLastLogIndex := n.getLastLogIndex()
 
 	isUpToDate := false
 	if candidateLastLogTerm != myLastLogTerm {
@@ -439,9 +495,9 @@ func (n *Node) MajoritySize() int {
 
 func (n *Node) AppendCommand(cmd *pb.Command) uint64 {
 	n.mu.Lock()
-	defer n.mu.Unlock()
+	// defer n.mu.Unlock()
 
-	newIndex := uint64(len(n.log) + 1)
+	newIndex := n.getLastLogIndex() + 1
 	entry := &pb.LogEntry{
 		Index:   newIndex,
 		Term:    n.currentTerm,
@@ -457,6 +513,9 @@ func (n *Node) AppendCommand(cmd *pb.Command) uint64 {
 	}
 	n.log = append(n.log, entry)
 	log.Printf("[%s] Appended entry: index=%d, term=%d, cmd=%s %s", n.id, newIndex, n.currentTerm, cmd.Type, cmd.Key)
+	n.mu.Unlock()
+
+	n.UpdateCommitIndex()
 	return newIndex
 }
 
@@ -472,13 +531,14 @@ func (n *Node) GetLogEntry(index uint64) *pb.LogEntry {
 func (n *Node) GetLogEntries(startIndex uint64) []*pb.LogEntry {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	if startIndex == 0 {
-		startIndex = 1
+	if startIndex <= n.lastIncludedIndex {
+		startIndex = n.lastIncludedIndex + 1
 	}
-	if startIndex > uint64(len(n.log)) {
+	offset := startIndex - n.lastIncludedIndex - 1
+	if offset >= uint64(len(n.log)) {
 		return []*pb.LogEntry{}
 	}
-	return n.log[startIndex-1:]
+	return n.log[offset:]
 }
 
 func (n *Node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
@@ -487,10 +547,16 @@ func (n *Node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
 	if prevLogIndex == 0 {
 		return true
 	}
-	if prevLogIndex > uint64(len(n.log)) {
+	if prevLogIndex > n.getLastLogIndex() {
 		return false
 	}
-	return n.log[prevLogIndex-1].Term == prevLogTerm
+
+	term := n.getLastLogTerm()
+	if term == 0 {
+		return false
+	}
+
+	return term == prevLogTerm
 }
 
 func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) bool {
@@ -501,19 +567,22 @@ func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) b
 		return true
 	}
 
-	insertIndex := int(prevLogIndex)
-
 	for _, entry := range entries {
-		if insertIndex < len(n.log) {
-			if n.log[insertIndex].Term != entry.Term {
-				log.Printf("[%s] Log conflict at index %d: deleting entries from index %d onwards", n.id, entry.Index, insertIndex+1)
-				if err := n.wal.Truncate(uint64(insertIndex) + 1); err != nil {
+		if entry.Index < n.lastIncludedIndex {
+			continue
+		}
+		offset := int(entry.Index - n.lastIncludedIndex - 1)
+
+		if offset < len(n.log) {
+			if n.log[offset].Term != entry.Term {
+				log.Printf("[%s] Log conflict at index %d: deleting entries from index %d onwards", n.id, entry.Index, entry.Index)
+
+				if err := n.wal.Truncate(entry.Index); err != nil {
 					log.Printf("[%s] WAL Truncate failed: %v", n.id, err)
 					return false
 				}
-				n.log = n.log[:insertIndex]
+				n.log = n.log[:offset]
 			} else {
-				insertIndex++
 				continue
 			}
 		}
@@ -523,7 +592,6 @@ func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) b
 		}
 		n.log = append(n.log, entry)
 		log.Printf("[%s] Appended entry from leader: index=%d, term=%d", n.id, entry.Index, entry.Term)
-		insertIndex++
 	}
 
 	return true
@@ -536,7 +604,7 @@ func (n *Node) GetNextIndex(peerAddr string) uint64 {
 	if idx, ok := n.nextIndex[peerAddr]; ok {
 		return idx
 	}
-	return uint64(len(n.log)) + 1
+	return n.getLastLogIndex() + 1
 }
 
 func (n *Node) SetNextIndex(peerAddr string, index uint64) {
@@ -576,7 +644,7 @@ func (n *Node) SetCommitIndex(index uint64) {
 func (n *Node) LogLength() uint64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return uint64(len(n.log))
+	return n.getLastLogIndex()
 }
 
 func (n *Node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint64) {
@@ -599,7 +667,7 @@ func (n *Node) UpdateCommitIndex() {
 	}
 
 	matchIndices := make([]uint64, 0, len(n.peers)+1)
-	matchIndices = append(matchIndices, uint64(len(n.log)))
+	matchIndices = append(matchIndices, n.getLastLogIndex())
 	for _, idx := range n.matchIndex {
 		matchIndices = append(matchIndices, idx)
 	}
@@ -612,13 +680,12 @@ func (n *Node) UpdateCommitIndex() {
 	N := matchIndices[majorityIdx]
 
 	if N > n.commitIndex {
-		if N > 0 && N <= uint64(len(n.log)) {
-			if n.log[N-1].Term == n.currentTerm {
-				log.Printf("[%s] CommitIndex updated: %d -> %d (majority reached)",
-					n.id, n.commitIndex, N)
-				n.commitIndex = N
-				n.applyLog()
-			}
+		term := n.getLogTerm(N)
+		if term == n.currentTerm {
+			log.Printf("[%s] CommitIndex updated: %d -> %d (majority reached)",
+				n.id, n.commitIndex, N)
+			n.commitIndex = N
+			n.applyLog()
 		}
 	}
 }
@@ -626,8 +693,10 @@ func (n *Node) UpdateCommitIndex() {
 func (n *Node) applyLog() {
 	for n.commitIndex > n.lastApplied {
 		n.lastApplied++
-		entry := n.log[n.lastApplied-1]
-
+		entry := n.getLogEntry(n.lastApplied)
+		if entry == nil {
+			break
+		}
 		if entry.Command == nil {
 			continue
 		}
@@ -648,6 +717,7 @@ func (n *Node) applyLog() {
 			log.Printf("[%s] Applied: DELETE %s (index=%d)", n.id, key, n.lastApplied)
 		}
 	}
+	n.checkSnapshot()
 }
 
 func (n *Node) GetValue(key string) (string, bool) {

@@ -62,8 +62,21 @@ message PingResponse {
     uint64 term = 3;
 }
 
+message InstallSnapshotRequest {
+    uint64 term = 1;
+    string leaderId = 2;
+    uint64 lastIncludedIndex = 3;
+    uint64 lastIncludedTerm = 4;
+    map<string, string> data = 5;
+}
+
+message InstallSnapshotResponse {
+    uint64 term = 1;
+}
+
 service RaftService {
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
     rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+    rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
     rpc Ping(PingRequest) returns (PingResponse);
 }

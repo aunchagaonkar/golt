@@ -179,7 +179,9 @@ func (n *Node) VotedFor() string {
 func (n *Node) Peers() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.peers
+	peersCopy := make([]string, len(n.peers))
+	copy(peersCopy, n.peers)
+	return peersCopy
 }
 func (n *Node) SetState(state NodeState) {
 	n.mu.Lock()
@@ -197,7 +199,7 @@ func (n *Node) SetCallbacks(onBecomeCandidate func(), onSendHeartbeat func()) {
 	n.onBecomeCandidate = onBecomeCandidate
 	n.onSendHeartbeat = onSendHeartbeat
 }
-func (n *Node) RandomElectionTimeout() time.Duration {
+func (n *Node) randomElectionTimeout() time.Duration {
 	diff := maxElectionTime - minElectionTime
 	return minElectionTime + time.Duration(rand.Int63n(int64(diff)))
 }
@@ -209,7 +211,7 @@ func (n *Node) StartElectionTimer() {
 	}
 	n.running = true
 	n.stopCh = make(chan struct{})
-	timeout := n.RandomElectionTimeout()
+	timeout := n.randomElectionTimeout()
 	n.electionTimer = time.NewTimer(timeout)
 	n.mu.Unlock()
 
@@ -236,7 +238,7 @@ func (n *Node) HandleElectionTimeout() {
 	n.mu.Lock()
 
 	if n.state == Leader {
-		timeout := n.RandomElectionTimeout()
+		timeout := n.randomElectionTimeout()
 		n.electionTimer.Reset(timeout)
 		n.mu.Unlock()
 		return
@@ -250,7 +252,7 @@ func (n *Node) HandleElectionTimeout() {
 	id := n.id
 	callback := n.onBecomeCandidate
 
-	timeout := n.RandomElectionTimeout()
+	timeout := n.randomElectionTimeout()
 	n.electionTimer.Reset(timeout)
 	n.mu.Unlock()
 
@@ -266,7 +268,7 @@ func (n *Node) ResetElectionTimer() {
 	if n.electionTimer == nil {
 		return
 	}
-	timeout := n.RandomElectionTimeout()
+	timeout := n.randomElectionTimeout()
 
 	if !n.electionTimer.Stop() {
 		select {
@@ -296,7 +298,7 @@ func (n *Node) BecomeFollower(term uint64) {
 	}
 
 	if oldState != Follower || oldTerm != term {
-		log.Printf("[%s] Becoming Follower for term %d", n.id, term)
+		log.Printf("[%s] Becoming Follower (term: %d, was: %s term %d)", n.id, term, oldState, oldTerm)
 	}
 }
 
@@ -304,6 +306,7 @@ func (n *Node) BecomeLeader() {
 	n.mu.Lock()
 
 	if n.state == Leader {
+		n.mu.Unlock()
 		return
 	}
 
@@ -551,7 +554,7 @@ func (n *Node) MatchesPrevLog(prevLogIndex, prevLogTerm uint64) bool {
 		return false
 	}
 
-	term := n.getLastLogTerm()
+	term := n.getLogTerm(prevLogIndex)
 	if term == 0 {
 		return false
 	}
@@ -604,7 +607,9 @@ func (n *Node) GetNextIndex(peerAddr string) uint64 {
 	if idx, ok := n.nextIndex[peerAddr]; ok {
 		return idx
 	}
-	return n.getLastLogIndex() + 1
+	// default to 1 for unknown peers - they likely need everything
+	// this will trigger InstallSnapshot if we have a snapshot
+	return 1
 }
 
 func (n *Node) SetNextIndex(peerAddr string, index uint64) {
@@ -652,9 +657,7 @@ func (n *Node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint6
 	defer n.mu.RUnlock()
 
 	prevLogIndex = nextIndex - 1
-	if prevLogIndex > 0 && prevLogIndex <= uint64(len(n.log)) {
-		prevLogTerm = n.log[prevLogIndex-1].Term
-	}
+	prevLogTerm = n.getLogTerm(prevLogIndex)
 	return prevLogIndex, prevLogTerm
 }
 

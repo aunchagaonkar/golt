@@ -114,7 +114,6 @@ func testLogRepair() {
 	} else {
 		log.Printf("FAILED: Follower %s has log length %d (expected %d)", followerID, actualLen, expectedLen)
 
-		// Debug info
 		log.Printf("  Leader log length: %d", nodeMap[leaderID].LogLength())
 		entries := nodeMap[followerID].GetLogEntries(1)
 		for _, e := range entries {

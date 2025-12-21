@@ -113,7 +113,7 @@ func testChaos() {
 					if idx > 0 {
 						log.Printf("Write req: %s=%s (idx=%d, leader=%s)", key, val, idx, leader.ID())
 						writtenKeys.Store(key, val)
-						time.Sleep(500 * time.Millisecond) // Slow down writes
+						time.Sleep(500 * time.Millisecond) // slow down writes
 						break
 					}
 				}

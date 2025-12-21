@@ -597,6 +597,11 @@ func (n *Node) AppendEntriesToLog(prevLogIndex uint64, entries []*pb.LogEntry) b
 		log.Printf("[%s] Appended entry from leader: index=%d, term=%d", n.id, entry.Index, entry.Term)
 	}
 
+	if err := n.wal.Sync(); err != nil {
+		log.Printf("[%s] WAL Sync failed: %v", n.id, err)
+		return false
+	}
+
 	return true
 }
 

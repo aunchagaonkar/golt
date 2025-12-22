@@ -233,6 +233,12 @@ func (s *Server) sendHeartbeats() {
 		go func(peerAddr string, c pb.RaftServiceClient) {
 
 			nextIndex := s.node.GetNextIndex(peerAddr)
+			lastIncludedIndex := s.node.LastIncludedIndex()
+			if nextIndex <= lastIncludedIndex {
+				s.sendInstallSnapshot(peerAddr, c)
+				return
+			}
+
 			entries := s.node.GetLogEntries(nextIndex)
 			prevLogIndex, prevLogTerm := s.node.GetPrevLogInfo(nextIndex)
 
@@ -269,12 +275,81 @@ func (s *Server) sendHeartbeats() {
 				}
 			} else {
 				if nextIndex > 1 {
-					s.node.SetNextIndex(peerAddr, nextIndex-1)
-					log.Printf("[%s] Peer %s log mismatch, decremented nextIndex to %d", leaderID, peerAddr, nextIndex-1)
+					newNextIndex := nextIndex - 1
+					s.node.SetNextIndex(peerAddr, newNextIndex)
+					log.Printf("[%s] Peer %s log mismatch, decremented nextIndex to %d", leaderID, peerAddr, newNextIndex)
+					if s.node.GetMatchIndex(peerAddr) == 0 && lastIncludedIndex > 0 {
+						log.Printf("[%s] Peer %s has matchIndex=0 and leader has snapshot, sending InstallSnapshot", leaderID, peerAddr)
+						s.sendInstallSnapshot(peerAddr, c)
+						return
+					}
+					if newNextIndex <= lastIncludedIndex {
+						s.sendInstallSnapshot(peerAddr, c)
+						return
+					}
 				}
 			}
 		}(addr, client)
 	}
+}
+
+func (s *Server) sendInstallSnapshot(peerAddr string, c pb.RaftServiceClient) {
+	leaderID := s.node.ID()
+	currentTerm := s.node.CurrentTerm()
+
+	snap, err := s.node.LoadSnapshot()
+	if err != nil || snap == nil {
+		log.Printf("[%s] Failed to load snapshot for %s: %v", leaderID, peerAddr, err)
+		return
+	}
+
+	log.Printf("[%s] Sending InstallSnapshot to %s (lastIncludedIndex: %d)",
+		leaderID, peerAddr, snap.LastIncludedIndex)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req := &pb.InstallSnapshotRequest{
+		Term:              currentTerm,
+		LeaderId:          leaderID,
+		LastIncludedIndex: snap.LastIncludedIndex,
+		LastIncludedTerm:  snap.LastIncludedTerm,
+		Data:              snap.Data,
+	}
+
+	resp, err := c.InstallSnapshot(ctx, req)
+	if err != nil {
+		log.Printf("[%s] InstallSnapshot to %s failed: %v", leaderID, peerAddr, err)
+		return
+	}
+
+	if resp.Term > currentTerm {
+		log.Printf("[%s] Discovered higher term %d from %s during InstallSnapshot, stepping down",
+			leaderID, resp.Term, peerAddr)
+		s.node.BecomeFollower(resp.Term)
+		return
+	}
+
+	s.node.SetNextIndex(peerAddr, snap.LastIncludedIndex+1)
+	s.node.SetMatchIndex(peerAddr, snap.LastIncludedIndex)
+
+	log.Printf("[%s] InstallSnapshot to %s succeeded. nextIndex=%d",
+		leaderID, peerAddr, snap.LastIncludedIndex+1)
+}
+
+func (s *Server) InstallSnapshot(ctx context.Context, req *pb.InstallSnapshotRequest) (*pb.InstallSnapshotResponse, error) {
+	log.Printf("[%s] Received InstallSnapshot from %s (term: %d, lastIncludedIndex: %d)",
+		s.node.ID(), req.LeaderId, req.Term, req.LastIncludedIndex)
+
+	term := s.node.HandleInstallSnapshot(
+		req.Term,
+		req.LeaderId,
+		req.LastIncludedIndex,
+		req.LastIncludedTerm,
+		req.Data,
+	)
+
+	return &pb.InstallSnapshotResponse{Term: term}, nil
 }
 
 func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {

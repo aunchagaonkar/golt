@@ -657,6 +657,22 @@ func (n *Node) LogLength() uint64 {
 	return n.getLastLogIndex()
 }
 
+func (n *Node) LastIncludedIndex() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.lastIncludedIndex
+}
+
+func (n *Node) LastIncludedTerm() uint64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.lastIncludedTerm
+}
+
+func (n *Node) LoadSnapshot() (*Snapshot, error) {
+	return n.snapshotStore.LoadSnapshot()
+}
+
 func (n *Node) GetPrevLogInfo(nextIndex uint64) (prevLogIndex, prevLogTerm uint64) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()

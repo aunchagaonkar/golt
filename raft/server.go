@@ -65,40 +65,42 @@ func (s *Server) ConnectToPeers() {
 	peers := s.node.Peers()
 
 	for _, peerAddr := range peers {
-		go func(addr string) {
-			for i := 0; i < 5; i++ {
-				conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-				if err != nil {
-					log.Printf("[%s] Failed to create client for peer %s (attempt %d): %v", s.node.ID(), addr, i+1, err)
-					if i < 4 {
-						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
-					}
-					continue
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-				_, err = pb.NewRaftServiceClient(conn).Ping(ctx, &pb.PingRequest{NodeId: s.node.ID()})
-				cancel()
-				if err != nil {
-					log.Printf("[%s] Ping test failed for peer %s (attempt %d): %v", s.node.ID(), addr, i+1, err)
-					conn.Close()
-					if i < 4 {
-						time.Sleep(time.Duration(100*(i+1)) * time.Millisecond)
-					}
-					continue
-				}
-
-				s.peerMu.Lock()
-				s.peerClients[addr] = pb.NewRaftServiceClient(conn)
-				s.peerConns[addr] = conn
-				s.peerMu.Unlock()
-
-				log.Printf("[%s] Connected to peer %s", s.node.ID(), addr)
-				return
-			}
-			log.Printf("[%s] Failed to connect to peer %s after 5 attempts", s.node.ID(), addr)
-		}(peerAddr)
+		go s.connectToPeer(peerAddr)
 	}
+}
+
+func (s *Server) connectToPeer(addr string) {
+	s.peerMu.RLock()
+	if _, exists := s.peerClients[addr]; exists {
+		s.peerMu.RUnlock()
+		return
+	}
+	s.peerMu.RUnlock()
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	_, err = pb.NewRaftServiceClient(conn).Ping(ctx, &pb.PingRequest{
+		NodeId:        s.node.ID(),
+		ListenAddress: s.node.Address(),
+	})
+	cancel()
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	s.peerMu.Lock()
+	s.peerClients[addr] = pb.NewRaftServiceClient(conn)
+	s.peerConns[addr] = conn
+	s.peerMu.Unlock()
+
+	s.node.SetNextIndex(addr, 1)
+
+	log.Printf("[%s] Connected to peer %s", s.node.ID(), addr)
 }
 func (s *Server) Stop() {
 	s.node.StopTimers()
@@ -441,6 +443,18 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 
 func (s *Server) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
 	log.Printf("[%s] Received Ping from %s", s.node.ID(), req.NodeId)
+
+	if req.ListenAddress != "" {
+		s.peerMu.RLock()
+		_, alreadyConnected := s.peerClients[req.ListenAddress]
+		s.peerMu.RUnlock()
+
+		if !alreadyConnected {
+			log.Printf("[%s] Discovered new peer %s at %s, initiating reverse connection",
+				s.node.ID(), req.NodeId, req.ListenAddress)
+			go s.connectToPeer(req.ListenAddress)
+		}
+	}
 
 	response := &pb.PingResponse{
 		NodeId: s.node.ID(),

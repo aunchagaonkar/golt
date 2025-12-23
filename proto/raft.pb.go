@@ -495,6 +495,7 @@ func (x *AppendEntriesResponse) GetSuccess() bool {
 type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=nodeId,proto3" json:"nodeId,omitempty"`
+	ListenAddress string                 `protobuf:"bytes,2,opt,name=listenAddress,proto3" json:"listenAddress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -532,6 +533,13 @@ func (*PingRequest) Descriptor() ([]byte, []int) {
 func (x *PingRequest) GetNodeId() string {
 	if x != nil {
 		return x.NodeId
+	}
+	return ""
+}
+
+func (x *PingRequest) GetListenAddress() string {
+	if x != nil {
+		return x.ListenAddress
 	}
 	return ""
 }
@@ -746,9 +754,10 @@ const file_proto_raft_proto_rawDesc = "" +
 	"\fleaderCommit\x18\x06 \x01(\x04R\fleaderCommit\"E\n" +
 	"\x15AppendEntriesResponse\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess\"%\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"K\n" +
 	"\vPingRequest\x12\x16\n" +
-	"\x06nodeId\x18\x01 \x01(\tR\x06nodeId\"a\n" +
+	"\x06nodeId\x18\x01 \x01(\tR\x06nodeId\x12$\n" +
+	"\rlistenAddress\x18\x02 \x01(\tR\rlistenAddress\"a\n" +
 	"\fPingResponse\x12\x16\n" +
 	"\x06nodeId\x18\x01 \x01(\tR\x06nodeId\x12%\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x0f.raft.NodeStateR\x05state\x12\x12\n" +

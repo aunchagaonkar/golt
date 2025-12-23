@@ -54,6 +54,7 @@ message AppendEntriesResponse {
 
 message PingRequest {
     string nodeId = 1;
+    string listenAddress = 2;
 }
 
 message PingResponse {

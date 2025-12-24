@@ -66,8 +66,9 @@ type Node struct {
 	nextIndex  map[string]uint64
 	matchIndex map[string]uint64
 
-	peers   []string
-	address string
+	peers      []string
+	address    string
+	leaderAddr string
 
 	electionTimer   *time.Timer
 	heartbeatTicker *time.Ticker
@@ -160,6 +161,7 @@ func (n *Node) Address() string {
 	defer n.mu.RUnlock()
 	return n.address
 }
+
 func (n *Node) State() NodeState {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -171,11 +173,13 @@ func (n *Node) CurrentTerm() uint64 {
 	defer n.mu.RUnlock()
 	return n.currentTerm
 }
+
 func (n *Node) VotedFor() string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.votedFor
 }
+
 func (n *Node) Peers() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -183,26 +187,43 @@ func (n *Node) Peers() []string {
 	copy(peersCopy, n.peers)
 	return peersCopy
 }
+
+func (n *Node) LeaderAddr() string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.leaderAddr
+}
+
+func (n *Node) SetLeaderAddr(addr string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.leaderAddr = addr
+}
+
 func (n *Node) SetState(state NodeState) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.state = state
 }
+
 func (n *Node) SetVotedFor(candidateID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.votedFor = candidateID
 }
+
 func (n *Node) SetCallbacks(onBecomeCandidate func(), onSendHeartbeat func()) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.onBecomeCandidate = onBecomeCandidate
 	n.onSendHeartbeat = onSendHeartbeat
 }
+
 func (n *Node) randomElectionTimeout() time.Duration {
 	diff := maxElectionTime - minElectionTime
 	return minElectionTime + time.Duration(rand.Int63n(int64(diff)))
 }
+
 func (n *Node) StartElectionTimer() {
 	n.mu.Lock()
 	if n.running {
@@ -218,6 +239,7 @@ func (n *Node) StartElectionTimer() {
 	log.Printf("[%s] Starting election timer (timeout: %v)", n.id, timeout)
 	go n.ElectionTimerLoop()
 }
+
 func (n *Node) ElectionTimerLoop() {
 	for {
 		n.mu.RLock()
@@ -234,6 +256,7 @@ func (n *Node) ElectionTimerLoop() {
 		}
 	}
 }
+
 func (n *Node) HandleElectionTimeout() {
 	n.mu.Lock()
 
@@ -391,6 +414,7 @@ func (n *Node) getLastLogTerm() uint64 {
 	}
 	return n.lastIncludedTerm
 }
+
 func (n *Node) getLogEntry(index uint64) *pb.LogEntry {
 	if index <= n.lastIncludedIndex {
 		return nil
@@ -401,6 +425,7 @@ func (n *Node) getLogEntry(index uint64) *pb.LogEntry {
 	}
 	return n.log[offset]
 }
+
 func (n *Node) getLogTerm(index uint64) uint64 {
 	if index == n.lastIncludedIndex {
 		return n.lastIncludedTerm

@@ -402,6 +402,7 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 		if req.Term > currentTerm || currentState != Follower {
 			s.node.BecomeFollower(req.Term)
 		}
+		s.node.SetLeaderAddr(req.LeaderId)
 		s.node.ResetElectionTimer()
 	}
 

@@ -3,6 +3,7 @@ module github.com/aunchagaonkar/golt
 go 1.25.0
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11

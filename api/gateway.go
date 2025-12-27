@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
+	"github.com/aunchagaonkar/golt/logger"
 	pb "github.com/aunchagaonkar/golt/proto"
 	"github.com/aunchagaonkar/golt/raft"
+	"github.com/google/uuid"
 )
 
 type Gateway struct {
@@ -35,10 +36,10 @@ func (g *Gateway) Start() error {
 		Handler: mux,
 	}
 
-	log.Printf("[Gateway] Starting HTTP server on %s", g.httpAddr)
+	logger.Info().Str("addr", g.httpAddr).Msg("Starting HTTP gateway")
 	go func() {
 		if err := g.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-			log.Printf("[Gateway] HTTP server error: %v", err)
+			logger.Error().Err(err).Msg("HTTP server error")
 		}
 	}()
 
@@ -71,14 +72,19 @@ type GetResponse struct {
 }
 
 type StatusResponse struct {
-	NodeID   string `json:"nodeId"`
-	State    string `json:"state"`
-	Term     uint64 `json:"term"`
-	Leader   string `json:"leader,omitempty"`
-	IsLeader bool   `json:"isLeader"`
+	NodeID      string `json:"nodeId"`
+	State       string `json:"state"`
+	Term        uint64 `json:"term"`
+	CommitIndex uint64 `json:"commitIndex"`
+	LogLength   uint64 `json:"logLength"`
+	Leader      string `json:"leader,omitempty"`
+	IsLeader    bool   `json:"isLeader"`
 }
 
 func (g *Gateway) handleSet(w http.ResponseWriter, r *http.Request) {
+	requestID := uuid.New().String()[:8]
+	log := logger.WithRequestID(requestID)
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -86,6 +92,7 @@ func (g *Gateway) handleSet(w http.ResponseWriter, r *http.Request) {
 
 	var req SetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Warn().Err(err).Msg("Invalid request body")
 		sendJSON(w, http.StatusBadRequest, SetResponse{Error: "invalid request body"})
 		return
 	}
@@ -94,18 +101,22 @@ func (g *Gateway) handleSet(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, http.StatusBadRequest, SetResponse{Error: "key is required"})
 		return
 	}
+	log.Info().Str("key", req.Key).Msg("SET request")
 
 	node := g.server.Node()
 
 	if node.State() != raft.Leader {
 		leaderAddr := node.LeaderAddr()
 		if leaderAddr == "" {
+			log.Warn().Msg("No leader available")
 			sendJSON(w, http.StatusServiceUnavailable, SetResponse{Error: "no leader"})
 			return
 		}
 
+		log.Info().Str("leader", leaderAddr).Msg("Forwarding to leader")
 		resp, err := g.forwardSet(leaderAddr, req)
 		if err != nil {
+			log.Error().Err(err).Msg("Forward failed")
 			sendJSON(w, http.StatusBadGateway, SetResponse{Error: fmt.Sprintf("forward failed: %v", err)})
 			return
 		}
@@ -121,14 +132,19 @@ func (g *Gateway) handleSet(w http.ResponseWriter, r *http.Request) {
 
 	index := node.AppendCommand(cmd)
 	if index == 0 {
+		log.Error().Msg("Append failed")
 		sendJSON(w, http.StatusInternalServerError, SetResponse{Error: "append failed"})
 		return
 	}
 
+	log.Info().Uint64("index", index).Msg("SET success")
 	sendJSON(w, http.StatusOK, SetResponse{Success: true, Index: index})
 }
 
 func (g *Gateway) handleGet(w http.ResponseWriter, r *http.Request) {
+	requestID := uuid.New().String()[:8]
+	log := logger.WithRequestID(requestID)
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -140,8 +156,12 @@ func (g *Gateway) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Info().Str("key", key).Msg("GET request")
+
 	node := g.server.Node()
 	value, found := node.GetValue(key)
+
+	log.Info().Bool("found", found).Msg("GET result")
 
 	sendJSON(w, http.StatusOK, GetResponse{
 		Key:   key,
@@ -154,11 +174,13 @@ func (g *Gateway) handleStatus(w http.ResponseWriter, r *http.Request) {
 	node := g.server.Node()
 
 	sendJSON(w, http.StatusOK, StatusResponse{
-		NodeID:   node.ID(),
-		State:    node.State().String(),
-		Term:     node.CurrentTerm(),
-		Leader:   node.LeaderAddr(),
-		IsLeader: node.State() == raft.Leader,
+		NodeID:      node.ID(),
+		State:       node.State().String(),
+		Term:        node.CurrentTerm(),
+		CommitIndex: node.CommitIndex(),
+		LogLength:   node.LogLength(),
+		Leader:      node.LeaderAddr(),
+		IsLeader:    node.State() == raft.Leader,
 	})
 }
 

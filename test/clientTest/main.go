@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/aunchagaonkar/golt/api"
+	"github.com/aunchagaonkar/golt/logger"
 	"github.com/aunchagaonkar/golt/raft"
 )
 
 func main() {
+	logger.Init("client-test")
 	testClient()
-
 	log.Println("All tests completed")
 }
 

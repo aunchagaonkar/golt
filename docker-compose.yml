@@ -1,0 +1,96 @@
+services:
+  node1:
+    build: .
+    container_name: golt-node1
+    command:
+      - "-id=node1"
+      - "-address=node1:7000"
+      - "-http=0.0.0.0:8000"
+      - "-peers=node2:7000,node3:7000,node4:7000,node5:7000"
+      - "-data=/data"
+    ports:
+      - "7001:7000"
+      - "8001:8000"
+    volumes:
+      - node1-data:/data
+    networks:
+      - golt-network
+
+  node2:
+    build: .
+    container_name: golt-node2
+    command:
+      - "-id=node2"
+      - "-address=node2:7000"
+      - "-http=0.0.0.0:8000"
+      - "-peers=node1:7000,node3:7000,node4:7000,node5:7000"
+      - "-data=/data"
+    ports:
+      - "7002:7000"
+      - "8002:8000"
+    volumes:
+      - node2-data:/data
+    networks:
+      - golt-network
+
+  node3:
+    build: .
+    container_name: golt-node3
+    command:
+      - "-id=node3"
+      - "-address=node3:7000"
+      - "-http=0.0.0.0:8000"
+      - "-peers=node1:7000,node2:7000,node4:7000,node5:7000"
+      - "-data=/data"
+    ports:
+      - "7003:7000"
+      - "8003:8000"
+    volumes:
+      - node3-data:/data
+    networks:
+      - golt-network
+
+  node4:
+    build: .
+    container_name: golt-node4
+    command:
+      - "-id=node4"
+      - "-address=node4:7000"
+      - "-http=0.0.0.0:8000"
+      - "-peers=node1:7000,node2:7000,node3:7000,node5:7000"
+      - "-data=/data"
+    ports:
+      - "7004:7000"
+      - "8004:8000"
+    volumes:
+      - node4-data:/data
+    networks:
+      - golt-network
+
+  node5:
+    build: .
+    container_name: golt-node5
+    command:
+      - "-id=node5"
+      - "-address=node5:7000"
+      - "-http=0.0.0.0:8000"
+      - "-peers=node1:7000,node2:7000,node3:7000,node4:7000"
+      - "-data=/data"
+    ports:
+      - "7005:7000"
+      - "8005:8000"
+    volumes:
+      - node5-data:/data
+    networks:
+      - golt-network
+
+networks:
+  golt-network:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+  node5-data:

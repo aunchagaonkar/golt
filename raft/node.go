@@ -127,7 +127,12 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 	}
 	log.Printf("[%s] Filtered log: %d entries remaining after snapshot (Index %d)", id, len(filteredLog), lastIncludedIndex)
 
-	return &Node{
+	recoveredCommitIndex := max(meta.CommitIndex, lastIncludedIndex)
+	recoveredLastApplied := max(meta.LastApplied, lastIncludedIndex)
+
+	log.Printf("[%s] Recovery: commitIndex=%d, lastApplied=%d (from metadata)", id, recoveredCommitIndex, recoveredLastApplied)
+
+	node := &Node{
 		id:                id,
 		address:           address,
 		currentTerm:       meta.CurrentTerm,
@@ -138,8 +143,8 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 		lsmStore:          lsmStore,
 		snapshotStore:     snapshotStore,
 		state:             Follower,
-		commitIndex:       lastIncludedIndex,
-		lastApplied:       lastIncludedIndex,
+		commitIndex:       recoveredCommitIndex,
+		lastApplied:       recoveredLastApplied,
 		lastIncludedIndex: lastIncludedIndex,
 		lastIncludedTerm:  lastIncludedTerm,
 		nextIndex:         make(map[string]uint64),
@@ -148,6 +153,10 @@ func NewNode(id, address string, peers []string, storageDir string) *Node {
 		stopCh:            make(chan struct{}),
 		running:           false,
 	}
+
+	node.recoverCommittedEntries()
+
+	return node
 }
 
 func (n *Node) ID() string {
@@ -334,6 +343,7 @@ func (n *Node) BecomeLeader() {
 	}
 
 	n.state = Leader
+	n.leaderAddr = n.id
 	term := n.currentTerm
 	id := n.id
 	lastLogIndex := n.getLastLogIndex()
@@ -673,6 +683,7 @@ func (n *Node) SetCommitIndex(index uint64) {
 		log.Printf("[%s] Updated commitIndex: %d -> %d", n.id, n.commitIndex, index)
 		n.commitIndex = index
 		n.applyLog()
+		n.saveMeta()
 	}
 }
 
@@ -735,6 +746,7 @@ func (n *Node) UpdateCommitIndex() {
 				n.id, n.commitIndex, N)
 			n.commitIndex = N
 			n.applyLog()
+			n.saveMeta()
 		}
 	}
 }
@@ -779,8 +791,38 @@ func (n *Node) saveMeta() {
 	meta := &Metadata{
 		CurrentTerm: n.currentTerm,
 		VotedFor:    n.votedFor,
+		CommitIndex: n.commitIndex,
+		LastApplied: n.lastApplied,
 	}
 	if err := n.metaStore.Save(meta); err != nil {
 		log.Printf("[%s] Failed to save metadata: %v", n.id, err)
+	}
+}
+
+func (n *Node) recoverCommittedEntries() {
+	replayCount := 0
+	for i := n.lastIncludedIndex + 1; i <= n.lastApplied; i++ {
+		entry := n.getLogEntry(i)
+		if entry == nil || entry.Command == nil {
+			continue
+		}
+		key := entry.Command.Key
+		val := entry.Command.Value
+
+		switch entry.Command.Type {
+		case pb.CommandType_SET:
+			if err := n.lsmStore.Put(key, val); err != nil {
+				log.Printf("[%s] Failed to replay SET: %v", n.id, err)
+			}
+			replayCount++
+		case pb.CommandType_DELETE:
+			if err := n.lsmStore.Delete(key); err != nil {
+				log.Printf("[%s] Failed to replay DELETE: %v", n.id, err)
+			}
+			replayCount++
+		}
+	}
+	if replayCount > 0 {
+		log.Printf("[%s] Replayed %d entries to state machine", n.id, replayCount)
 	}
 }

@@ -11,6 +11,8 @@ import (
 type Metadata struct {
 	CurrentTerm uint64 `json:"currentTerm"`
 	VotedFor    string `json:"votedFor"`
+	CommitIndex uint64 `json:"commitIndex"`
+	LastApplied uint64 `json:"lastApplied"`
 }
 
 type MetaStore struct {

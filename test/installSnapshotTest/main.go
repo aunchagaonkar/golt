@@ -42,14 +42,14 @@ func testInstallSnapshot() {
 	log.Println("Starting node1 and node2")
 
 	node1 := raft.NewNode("node1", addrs[0], getPeers(0), dirs[0])
-	server1 := raft.NewServer(node1)
+	server1 := raft.NewServer(node1, "")
 	if err := server1.Start(); err != nil {
 		log.Fatalf("Server1 start failed: %v", err)
 	}
 	defer server1.Stop()
 
 	node2 := raft.NewNode("node2", addrs[1], getPeers(1), dirs[1])
-	server2 := raft.NewServer(node2)
+	server2 := raft.NewServer(node2, "")
 	if err := server2.Start(); err != nil {
 		log.Fatalf("Server2 start failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func testInstallSnapshot() {
 
 	log.Println("Starting node3 - lagging node")
 	node3 := raft.NewNode("node3", addrs[2], getPeers(2), dirs[2])
-	server3 := raft.NewServer(node3)
+	server3 := raft.NewServer(node3, "")
 	if err := server3.Start(); err != nil {
 		log.Fatalf("Server3 start failed: %v", err)
 	}

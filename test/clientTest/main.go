@@ -50,7 +50,7 @@ func testClient() {
 
 	for i := 0; i < 3; i++ {
 		node := raft.NewNode(fmt.Sprintf("node%d", i+1), raftAddrs[i], getPeers(i), dirs[i])
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Node %d start error: %v", i+1, err)
 		}

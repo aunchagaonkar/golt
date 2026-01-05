@@ -125,7 +125,7 @@ func startShardGroup(shardID string, raftAddrs, httpAddrs []string, dirs []strin
 
 		nodeID := fmt.Sprintf("%s-node%d", shardID, i+1)
 		node := raft.NewNode(nodeID, raftAddrs[i], peers, dirs[i])
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", nodeID, err)

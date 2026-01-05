@@ -33,7 +33,7 @@ func testLogReplication() {
 	for _, cfg := range nodes {
 		dir, _ := os.MkdirTemp("", "golt-log-rep-"+cfg.id)
 		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)
 		}

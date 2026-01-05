@@ -37,7 +37,7 @@ func testLogRepair() {
 	for _, cfg := range nodes {
 		dir, _ := os.MkdirTemp("", "golt-logincon"+cfg.id)
 		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)
 		}
@@ -97,7 +97,7 @@ func testLogRepair() {
 	time.Sleep(2 * time.Second)
 
 	log.Printf("Restarting follower %s...", followerID)
-	newServer := raft.NewServer(nodeMap[followerID])
+	newServer := raft.NewServer(nodeMap[followerID], "")
 	if err := newServer.Start(); err != nil {
 		log.Fatalf("Failed to restart %s: %v", followerID, err)
 	}

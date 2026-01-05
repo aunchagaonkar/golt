@@ -48,7 +48,7 @@ func testChaos() {
 	for _, cfg := range nodes {
 		dir, _ := os.MkdirTemp("", "golt-chaos-"+cfg.id)
 		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)
 		}
@@ -74,7 +74,7 @@ func testChaos() {
 			serverMap[targetID].Stop()
 
 			newNode := nodeMap[targetID]
-			newServer := raft.NewServer(newNode)
+			newServer := raft.NewServer(newNode, "")
 			if err := newServer.Start(); err != nil {
 				log.Printf("Failed to restart %s: %v", targetID, err)
 			} else {

@@ -82,7 +82,7 @@ func testLinearizability() {
 		}
 
 		node := raft.NewNode(fmt.Sprintf("node%d", i+1), raftAddrs[i], peers, dirs[i])
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Server %d start failed: %v", i+1, err)
 		}

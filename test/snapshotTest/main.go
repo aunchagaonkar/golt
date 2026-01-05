@@ -31,7 +31,7 @@ func testSnapshot() {
 	peers := []string{}
 	startNode := func() (*raft.Server, *raft.Node) {
 		n := raft.NewNode(nodeID, addr, peers, dir)
-		s := raft.NewServer(n)
+		s := raft.NewServer(n, "")
 		if err := s.Start(); err != nil {
 			log.Fatalf("Server start failed: %v", err)
 		}

@@ -31,7 +31,7 @@ func testSingleNodeElectionTimeout() {
 	defer os.RemoveAll(dir)
 
 	node := raft.NewNode("node1", "localhost:8001", []string{}, dir)
-	server := raft.NewServer(node)
+	server := raft.NewServer(node, "")
 
 	if err := server.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
@@ -84,7 +84,7 @@ func testHeartbeatPreventsElection() {
 	for _, cfg := range nodes {
 		dir, _ := os.MkdirTemp("", "golt-elect-prev-"+cfg.id)
 		node := raft.NewNode(cfg.id, cfg.address, cfg.peers, dir)
-		server := raft.NewServer(node)
+		server := raft.NewServer(node, "")
 		if err := server.Start(); err != nil {
 			log.Fatalf("Failed to start %s: %v", cfg.id, err)
 		}

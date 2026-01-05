@@ -118,15 +118,15 @@ func (g *Gateway) handleSet(w http.ResponseWriter, r *http.Request) {
 	node := g.server.Node()
 
 	if node.State() != raft.Leader {
-		leaderAddr := node.LeaderAddr()
-		if leaderAddr == "" {
+		leaderHttpAddr := g.server.GetLeaderHttpAddr()
+		if leaderHttpAddr == "" {
 			log.Warn().Msg("No leader available")
 			sendJSON(w, http.StatusServiceUnavailable, SetResponse{Error: "no leader"})
 			return
 		}
 
-		log.Info().Str("leader", leaderAddr).Msg("Forwarding to leader")
-		resp, err := g.forwardSet(leaderAddr, req)
+		log.Info().Str("leader", leaderHttpAddr).Msg("Forwarding to leader")
+		resp, err := g.forwardSet(leaderHttpAddr, req)
 		if err != nil {
 			log.Error().Err(err).Msg("Forward failed")
 			sendJSON(w, http.StatusBadGateway, SetResponse{Error: fmt.Sprintf("forward failed: %v", err)})

@@ -55,12 +55,14 @@ message AppendEntriesResponse {
 message PingRequest {
     string nodeId = 1;
     string listenAddress = 2;
+    string httpAddress = 3;
 }
 
 message PingResponse {
     string nodeId = 1;
     NodeState state = 2;
     uint64 term = 3;
+    string httpAddress = 4;
 }
 
 message InstallSnapshotRequest {

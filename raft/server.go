@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,17 +19,35 @@ type Server struct {
 	node       *Node
 	grpcServer *grpc.Server
 	listener   net.Listener
+	httpAddr   string
 
-	peerMu      sync.RWMutex
-	peerClients map[string]pb.RaftServiceClient
-	peerConns   map[string]*grpc.ClientConn
+	peerMu        sync.RWMutex
+	peerClients   map[string]pb.RaftServiceClient
+	peerConns     map[string]*grpc.ClientConn
+	peerHttpAddrs map[string]string
 }
 
-func NewServer(node *Node) *Server {
+func NewServer(node *Node, httpAddr string) *Server {
+	reachableHttpAddr := httpAddr
+	if httpAddr != "" {
+		grpcAddr := node.Address()
+		grpcHost := grpcAddr
+		if idx := strings.LastIndex(grpcAddr, ":"); idx != -1 {
+			grpcHost = grpcAddr[:idx]
+		}
+		httpPort := "8000"
+		if idx := strings.LastIndex(httpAddr, ":"); idx != -1 {
+			httpPort = httpAddr[idx+1:]
+		}
+		reachableHttpAddr = grpcHost + ":" + httpPort
+	}
+
 	s := &Server{
-		node:        node,
-		peerClients: make(map[string]pb.RaftServiceClient),
-		peerConns:   make(map[string]*grpc.ClientConn),
+		node:          node,
+		httpAddr:      reachableHttpAddr,
+		peerClients:   make(map[string]pb.RaftServiceClient),
+		peerConns:     make(map[string]*grpc.ClientConn),
+		peerHttpAddrs: make(map[string]string),
 	}
 	node.SetCallbacks(
 		s.onBecomeCandidate,
@@ -83,9 +102,10 @@ func (s *Server) connectToPeer(addr string) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	_, err = pb.NewRaftServiceClient(conn).Ping(ctx, &pb.PingRequest{
+	resp, err := pb.NewRaftServiceClient(conn).Ping(ctx, &pb.PingRequest{
 		NodeId:        s.node.ID(),
 		ListenAddress: s.node.Address(),
+		HttpAddress:   s.httpAddr,
 	})
 	cancel()
 	if err != nil {
@@ -96,11 +116,14 @@ func (s *Server) connectToPeer(addr string) {
 	s.peerMu.Lock()
 	s.peerClients[addr] = pb.NewRaftServiceClient(conn)
 	s.peerConns[addr] = conn
+	if resp.NodeId != "" && resp.HttpAddress != "" {
+		s.peerHttpAddrs[resp.NodeId] = resp.HttpAddress
+	}
 	s.peerMu.Unlock()
 
 	s.node.SetNextIndex(addr, 1)
 
-	log.Printf("[%s] Connected to peer %s", s.node.ID(), addr)
+	log.Printf("[%s] Connected to peer %s (httpAddr: %s)", s.node.ID(), addr, resp.HttpAddress)
 }
 func (s *Server) Stop() {
 	s.node.StopTimers()
@@ -443,7 +466,13 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 }
 
 func (s *Server) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
-	log.Printf("[%s] Received Ping from %s", s.node.ID(), req.NodeId)
+	log.Printf("[%s] Received Ping from %s (httpAddr: %s)", s.node.ID(), req.NodeId, req.HttpAddress)
+
+	if req.NodeId != "" && req.HttpAddress != "" {
+		s.peerMu.Lock()
+		s.peerHttpAddrs[req.NodeId] = req.HttpAddress
+		s.peerMu.Unlock()
+	}
 
 	if req.ListenAddress != "" {
 		s.peerMu.RLock()
@@ -458,13 +487,27 @@ func (s *Server) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingRespons
 	}
 
 	response := &pb.PingResponse{
-		NodeId: s.node.ID(),
-		State:  s.node.State().ToProto(),
-		Term:   s.node.CurrentTerm(),
+		NodeId:      s.node.ID(),
+		State:       s.node.State().ToProto(),
+		Term:        s.node.CurrentTerm(),
+		HttpAddress: s.httpAddr,
 	}
 
 	log.Printf("[%s] Ping response: nodeId=%s, state=%s, term=%d",
 		s.node.ID(), response.NodeId, response.State, response.Term)
 
 	return response, nil
+}
+
+func (s *Server) GetLeaderHttpAddr() string {
+	leaderId := s.node.LeaderAddr()
+	if leaderId == "" {
+		return ""
+	}
+	if leaderId == s.node.ID() {
+		return s.httpAddr
+	}
+	s.peerMu.RLock()
+	defer s.peerMu.RUnlock()
+	return s.peerHttpAddrs[leaderId]
 }

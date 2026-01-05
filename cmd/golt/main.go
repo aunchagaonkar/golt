@@ -46,7 +46,7 @@ func main() {
 	log.Printf("Data Directory: %s", *dataDir)
 
 	node := raft.NewNode(*id, *address, peerList, *dataDir)
-	server := raft.NewServer(node)
+	server := raft.NewServer(node, *httpAddr)
 	if err := server.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

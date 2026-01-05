@@ -496,6 +496,7 @@ type PingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=nodeId,proto3" json:"nodeId,omitempty"`
 	ListenAddress string                 `protobuf:"bytes,2,opt,name=listenAddress,proto3" json:"listenAddress,omitempty"`
+	HttpAddress   string                 `protobuf:"bytes,3,opt,name=httpAddress,proto3" json:"httpAddress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -544,11 +545,19 @@ func (x *PingRequest) GetListenAddress() string {
 	return ""
 }
 
+func (x *PingRequest) GetHttpAddress() string {
+	if x != nil {
+		return x.HttpAddress
+	}
+	return ""
+}
+
 type PingResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=nodeId,proto3" json:"nodeId,omitempty"`
 	State         NodeState              `protobuf:"varint,2,opt,name=state,proto3,enum=raft.NodeState" json:"state,omitempty"`
 	Term          uint64                 `protobuf:"varint,3,opt,name=term,proto3" json:"term,omitempty"`
+	HttpAddress   string                 `protobuf:"bytes,4,opt,name=httpAddress,proto3" json:"httpAddress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -602,6 +611,13 @@ func (x *PingResponse) GetTerm() uint64 {
 		return x.Term
 	}
 	return 0
+}
+
+func (x *PingResponse) GetHttpAddress() string {
+	if x != nil {
+		return x.HttpAddress
+	}
+	return ""
 }
 
 type InstallSnapshotRequest struct {
@@ -754,14 +770,16 @@ const file_proto_raft_proto_rawDesc = "" +
 	"\fleaderCommit\x18\x06 \x01(\x04R\fleaderCommit\"E\n" +
 	"\x15AppendEntriesResponse\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess\"K\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"m\n" +
 	"\vPingRequest\x12\x16\n" +
 	"\x06nodeId\x18\x01 \x01(\tR\x06nodeId\x12$\n" +
-	"\rlistenAddress\x18\x02 \x01(\tR\rlistenAddress\"a\n" +
+	"\rlistenAddress\x18\x02 \x01(\tR\rlistenAddress\x12 \n" +
+	"\vhttpAddress\x18\x03 \x01(\tR\vhttpAddress\"\x83\x01\n" +
 	"\fPingResponse\x12\x16\n" +
 	"\x06nodeId\x18\x01 \x01(\tR\x06nodeId\x12%\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x0f.raft.NodeStateR\x05state\x12\x12\n" +
-	"\x04term\x18\x03 \x01(\x04R\x04term\"\x97\x02\n" +
+	"\x04term\x18\x03 \x01(\x04R\x04term\x12 \n" +
+	"\vhttpAddress\x18\x04 \x01(\tR\vhttpAddress\"\x97\x02\n" +
 	"\x16InstallSnapshotRequest\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x1a\n" +
 	"\bleaderId\x18\x02 \x01(\tR\bleaderId\x12,\n" +
